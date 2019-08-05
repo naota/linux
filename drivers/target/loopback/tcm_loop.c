@@ -343,10 +343,10 @@ static int tcm_loop_driver_probe(struct device *dev)
 	 */
 	*((struct tcm_loop_hba **)sh->hostdata) = tl_hba;
 	/*
-	 * Setup single ID, Channel and LUN for now..
+	 * Setup single ID, and Channel for now..
 	 */
 	sh->max_id = 2;
-	sh->max_lun = 0;
+	sh->max_lun = U64_MAX;
 	sh->max_channel = 0;
 	sh->max_cmd_len = SCSI_MAX_VARLEN_CDB_SIZE;
 	sh->nr_hw_queues = tcm_loop_nr_hw_queues;
