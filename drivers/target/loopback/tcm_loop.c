@@ -658,16 +658,16 @@ static void tcm_loop_port_unlink(
 
 	sd = scsi_device_lookup(tl_hba->sh, 0, tl_tpg->tl_tpgt,
 				se_lun->unpacked_lun);
-	if (!sd) {
-		pr_err("Unable to locate struct scsi_device for %d:%d:%llu\n",
-		       0, tl_tpg->tl_tpgt, se_lun->unpacked_lun);
-		return;
+	if (sd) {
+		/*
+		 * Remove Linux/SCSI struct scsi_device by HCTL
+		 */
+		scsi_remove_device(sd);
+		scsi_device_put(sd);
+	} else {
+		pr_debug("Unable to locate struct scsi_device for %d:%d:%llu\n",
+			 0, tl_tpg->tl_tpgt, se_lun->unpacked_lun);
 	}
-	/*
-	 * Remove Linux/SCSI struct scsi_device by HCTL
-	 */
-	scsi_remove_device(sd);
-	scsi_device_put(sd);
 
 	atomic_dec_mb(&tl_tpg->tl_tpg_port_count);
 
