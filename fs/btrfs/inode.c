@@ -50,6 +50,7 @@
 #include "delalloc-space.h"
 #include "block-group.h"
 #include "space-info.h"
+#include "zoned.h"
 
 struct btrfs_iget_args {
 	u64 ino;
@@ -2829,6 +2830,9 @@ static int btrfs_finish_ordered_io(struct btrfs_ordered_extent *ordered_extent)
 	bool truncated = false;
 	bool clear_reserved_extent = true;
 	unsigned int clear_bits = EXTENT_DEFRAG;
+
+	if (ordered_extent->disk)
+		btrfs_rewrite_logical_zoned(ordered_extent);
 
 	start = ordered_extent->file_offset;
 	end = start + ordered_extent->num_bytes - 1;
