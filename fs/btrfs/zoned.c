@@ -265,3 +265,21 @@ int btrfs_check_zoned_mode(struct btrfs_fs_info *fs_info)
 out:
 	return ret;
 }
+
+int btrfs_check_mountopts_zoned(struct btrfs_fs_info *info)
+{
+	if (!btrfs_is_zoned(info))
+		return 0;
+
+	/*
+	 * SPACE CACHE writing is not CoWed. Disable that to avoid write
+	 * errors in sequential zones.
+	 */
+	if (btrfs_test_opt(info, SPACE_CACHE)) {
+		btrfs_err(info,
+			  "space cache v1 not supportted in ZONED mode");
+		return -EOPNOTSUPP;
+	}
+
+	return 0;
+}
