@@ -34,6 +34,7 @@
 #include "block-group.h"
 #include "discard.h"
 #include "rcu-string.h"
+#include "zoned.h"
 
 #undef SCRAMBLE_DELAYED_REFS
 
@@ -2725,6 +2726,9 @@ fetch_cluster_info(struct btrfs_fs_info *fs_info,
 {
 	struct btrfs_free_cluster *ret = NULL;
 
+	if (btrfs_is_zoned(fs_info))
+		return NULL;
+
 	*empty_cluster = 0;
 	if (btrfs_mixed_space_info(space_info))
 		return ret;
@@ -2808,7 +2812,11 @@ static int unpin_extent_range(struct btrfs_fs_info *fs_info,
 		space_info->max_extent_size = 0;
 		percpu_counter_add_batch(&space_info->total_bytes_pinned,
 			    -len, BTRFS_TOTAL_BYTES_PINNED_BATCH);
-		if (cache->ro) {
+		if (btrfs_is_zoned(fs_info)) {
+			/* Need reset before reusing in a zoned block group */
+			space_info->bytes_zone_unusable += len;
+			readonly = true;
+		} else if (cache->ro) {
 			space_info->bytes_readonly += len;
 			readonly = true;
 		}
