@@ -281,5 +281,11 @@ int btrfs_check_mountopts_zoned(struct btrfs_fs_info *info)
 		return -EOPNOTSUPP;
 	}
 
+	if (btrfs_test_opt(info, NODATACOW)) {
+		btrfs_err(info,
+		  "cannot enable nodatacow with ZONED mode");
+		return -EOPNOTSUPP;
+	}
+
 	return 0;
 }
