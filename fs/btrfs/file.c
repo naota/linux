@@ -2226,7 +2226,7 @@ int btrfs_sync_file(struct file *file, loff_t start, loff_t end, int datasync)
 	 * the current transaction commits before the ordered extents complete
 	 * and a power failure happens right after that.
 	 */
-	if (full_sync) {
+	if (full_sync || fs_info->zoned) {
 		ret = btrfs_wait_ordered_range(inode, start, len);
 	} else {
 		/*
