@@ -870,13 +870,11 @@ EXPORT_SYMBOL(bio_add_pc_page);
 int bio_add_zone_append_page(struct bio *bio, struct page *page,
 			     unsigned int len, unsigned int offset)
 {
-	struct request_queue *q;
+	struct request_queue *q = bio->bi_disk->queue;
 	bool same_page = false;
 
 	if (WARN_ON_ONCE(bio_op(bio) != REQ_OP_ZONE_APPEND))
 		return 0;
-
-	q = bio->bi_disk->queue;
 
 	if (WARN_ON_ONCE(!blk_queue_is_zoned(q)))
 		return 0;
