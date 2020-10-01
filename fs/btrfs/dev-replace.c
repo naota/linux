@@ -454,7 +454,7 @@ static int mark_block_group_to_copy(struct btrfs_fs_info *fs_info,
 	u64 chunk_offset, length;
 
 	/* Do not use "to_copy" on non-ZONED for now */
-	if (!btrfs_fs_incompat(fs_info, ZONED))
+	if (!btrfs_is_zoned(fs_info))
 		return 0;
 
 	mutex_lock(&fs_info->chunk_mutex);
@@ -565,7 +565,7 @@ bool btrfs_finish_block_group_to_copy(struct btrfs_device *srcdev,
 	int i;
 
 	/* Do not use "to_copy" on non-ZONED for now */
-	if (!btrfs_fs_incompat(fs_info, ZONED))
+	if (!btrfs_is_zoned(fs_info))
 		return true;
 
 	spin_lock(&cache->lock);
