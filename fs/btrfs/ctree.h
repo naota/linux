@@ -948,6 +948,12 @@ struct btrfs_fs_info {
 	/* Type of exclusive operation running */
 	unsigned long exclusive_operation;
 
+	/* Zone size when in ZONED mode */
+	union {
+		u64 zone_size;
+		u64 zoned;
+	};
+
 #ifdef CONFIG_BTRFS_FS_REF_VERIFY
 	spinlock_t ref_verify_lock;
 	struct rb_root block_tree;
@@ -3594,5 +3600,10 @@ static inline int btrfs_is_testing(struct btrfs_fs_info *fs_info)
 	return 0;
 }
 #endif
+
+static inline bool btrfs_is_zoned(struct btrfs_fs_info *fs_info)
+{
+	return fs_info->zoned != 0;
+}
 
 #endif
