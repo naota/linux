@@ -3562,7 +3562,7 @@ int scrub_enumerate_chunks(struct scrub_ctx *sctx,
 			goto skip;
 
 
-		if (sctx->is_dev_replace && btrfs_fs_incompat(fs_info, ZONED)) {
+		if (sctx->is_dev_replace && btrfs_is_zoned(fs_info)) {
 			spin_lock(&cache->lock);
 			if (!cache->to_copy) {
 				spin_unlock(&cache->lock);
