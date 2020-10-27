@@ -210,6 +210,7 @@ iomap_dio_bio_actor(struct inode *inode, loff_t pos, loff_t length,
 	struct bio *bio;
 	bool need_zeroout = false;
 	bool use_fua = false;
+	bool zone_append = false;
 	int nr_pages, ret = 0;
 	size_t copied = 0;
 	size_t orig_count;
@@ -240,6 +241,8 @@ iomap_dio_bio_actor(struct inode *inode, loff_t pos, loff_t length,
 		    blk_queue_fua(bdev_get_queue(iomap->bdev)))
 			use_fua = true;
 	}
+
+	zone_append = iomap->flags & IOMAP_F_ZONE_APPEND;
 
 	/*
 	 * Save the original count and trim the iter to just the extent we
@@ -278,6 +281,19 @@ iomap_dio_bio_actor(struct inode *inode, loff_t pos, loff_t length,
 		bio->bi_private = dio;
 		bio->bi_end_io = iomap_dio_bio_end_io;
 
+		if (dio->flags & IOMAP_DIO_WRITE) {
+			bio->bi_opf = (zone_append ? REQ_OP_ZONE_APPEND : REQ_OP_WRITE) |
+				      REQ_SYNC | REQ_IDLE;
+			if (use_fua)
+				bio->bi_opf |= REQ_FUA;
+			else
+				dio->flags &= ~IOMAP_DIO_WRITE_FUA;
+		} else {
+			WARN_ON_ONCE(zone_append);
+
+			bio->bi_opf = REQ_OP_READ;
+		}
+
 		ret = bio_iov_iter_get_pages(bio, dio->submit.iter);
 		if (unlikely(ret)) {
 			/*
@@ -292,14 +308,8 @@ iomap_dio_bio_actor(struct inode *inode, loff_t pos, loff_t length,
 
 		n = bio->bi_iter.bi_size;
 		if (dio->flags & IOMAP_DIO_WRITE) {
-			bio->bi_opf = REQ_OP_WRITE | REQ_SYNC | REQ_IDLE;
-			if (use_fua)
-				bio->bi_opf |= REQ_FUA;
-			else
-				dio->flags &= ~IOMAP_DIO_WRITE_FUA;
 			task_io_account_write(n);
 		} else {
-			bio->bi_opf = REQ_OP_READ;
 			if (dio->flags & IOMAP_DIO_DIRTY)
 				bio_set_pages_dirty(bio);
 		}
