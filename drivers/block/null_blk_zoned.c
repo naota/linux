@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/vmalloc.h>
+#include <linux/bitmap.h>
 #include "null_blk.h"
 
 #define CREATE_TRACE_POINTS
@@ -45,7 +46,13 @@ int null_init_zoned_dev(struct nullb_device *dev, struct request_queue *q)
 	if (!dev->zones)
 		return -ENOMEM;
 
-	spin_lock_init(&dev->zone_lock);
+	spin_lock_init(&dev->zone_dev_lock);
+	dev->zone_locks = bitmap_zalloc(dev->nr_zones, GFP_KERNEL);
+	if (!dev->zone_locks) {
+		kvfree(dev->zones);
+		return -ENOMEM;
+	}
+
 	if (dev->zone_nr_conv >= dev->nr_zones) {
 		dev->zone_nr_conv = dev->nr_zones - 1;
 		pr_info("changed the number of conventional zones to %u",
@@ -124,7 +131,18 @@ int null_register_zoned_dev(struct nullb *nullb)
 
 void null_free_zoned_dev(struct nullb_device *dev)
 {
+	bitmap_free(dev->zone_locks);
 	kvfree(dev->zones);
+}
+
+static inline void null_lock_zone(struct nullb_device *dev, unsigned int zno)
+{
+	wait_on_bit_lock_io(dev->zone_locks, zno, TASK_UNINTERRUPTIBLE);
+}
+
+static inline void null_unlock_zone(struct nullb_device *dev, unsigned int zno)
+{
+	clear_and_wake_up_bit(zno, dev->zone_locks);
 }
 
 int null_report_zones(struct gendisk *disk, sector_t sector,
@@ -132,7 +150,7 @@ int null_report_zones(struct gendisk *disk, sector_t sector,
 {
 	struct nullb *nullb = disk->private_data;
 	struct nullb_device *dev = nullb->dev;
-	unsigned int first_zone, i;
+	unsigned int first_zone, i, zno;
 	struct blk_zone zone;
 	int error;
 
@@ -143,17 +161,17 @@ int null_report_zones(struct gendisk *disk, sector_t sector,
 	nr_zones = min(nr_zones, dev->nr_zones - first_zone);
 	trace_nullb_report_zones(nullb, nr_zones);
 
-	for (i = 0; i < nr_zones; i++) {
+	zno = first_zone;
+	for (i = 0; i < nr_zones; i++, zno++) {
 		/*
 		 * Stacked DM target drivers will remap the zone information by
 		 * modifying the zone information passed to the report callback.
 		 * So use a local copy to avoid corruption of the device zone
 		 * array.
 		 */
-		spin_lock_irq(&dev->zone_lock);
-		memcpy(&zone, &dev->zones[first_zone + i],
-		       sizeof(struct blk_zone));
-		spin_unlock_irq(&dev->zone_lock);
+		null_lock_zone(dev, zno);
+		memcpy(&zone, &dev->zones[zno], sizeof(struct blk_zone));
+		null_unlock_zone(dev, zno);
 
 		error = cb(&zone, i, data);
 		if (error)
@@ -163,6 +181,10 @@ int null_report_zones(struct gendisk *disk, sector_t sector,
 	return nr_zones;
 }
 
+/*
+ * This is called in the case of memory backing from null_process_cmd()
+ * with the target zone already locked.
+ */
 size_t null_zone_valid_read_len(struct nullb *nullb,
 				sector_t sector, unsigned int len)
 {
@@ -183,13 +205,17 @@ size_t null_zone_valid_read_len(struct nullb *nullb,
 
 static blk_status_t null_close_zone(struct nullb_device *dev, struct blk_zone *zone)
 {
+	blk_status_t ret = BLK_STS_OK;
+
 	if (zone->type == BLK_ZONE_TYPE_CONVENTIONAL)
 		return BLK_STS_IOERR;
+
+	spin_lock(&dev->zone_dev_lock);
 
 	switch (zone->cond) {
 	case BLK_ZONE_COND_CLOSED:
 		/* close operation on closed is not an error */
-		return BLK_STS_OK;
+		goto unlock;
 	case BLK_ZONE_COND_IMP_OPEN:
 		dev->nr_zones_imp_open--;
 		break;
@@ -199,7 +225,8 @@ static blk_status_t null_close_zone(struct nullb_device *dev, struct blk_zone *z
 	case BLK_ZONE_COND_EMPTY:
 	case BLK_ZONE_COND_FULL:
 	default:
-		return BLK_STS_IOERR;
+		ret = BLK_STS_IOERR;
+		goto unlock;
 	}
 
 	if (zone->wp == zone->start) {
@@ -209,7 +236,10 @@ static blk_status_t null_close_zone(struct nullb_device *dev, struct blk_zone *z
 		dev->nr_zones_closed++;
 	}
 
-	return BLK_STS_OK;
+unlock:
+	spin_unlock(&dev->zone_dev_lock);
+
+	return ret;
 }
 
 static void null_close_first_imp_zone(struct nullb_device *dev)
@@ -299,22 +329,27 @@ static blk_status_t null_zone_write(struct nullb_cmd *cmd, sector_t sector,
 	if (zone->type == BLK_ZONE_TYPE_CONVENTIONAL)
 		return null_process_cmd(cmd, REQ_OP_WRITE, sector, nr_sectors);
 
+	null_lock_zone(dev, zno);
+	spin_lock(&dev->zone_dev_lock);
+
 	switch (zone->cond) {
 	case BLK_ZONE_COND_FULL:
 		/* Cannot write to a full zone */
-		return BLK_STS_IOERR;
+		ret = BLK_STS_IOERR;
+		goto unlock;
 	case BLK_ZONE_COND_EMPTY:
 	case BLK_ZONE_COND_CLOSED:
 		ret = null_check_zone_resources(dev, zone);
 		if (ret != BLK_STS_OK)
-			return ret;
+			goto unlock;
 		break;
 	case BLK_ZONE_COND_IMP_OPEN:
 	case BLK_ZONE_COND_EXP_OPEN:
 		break;
 	default:
 		/* Invalid zone condition */
-		return BLK_STS_IOERR;
+		ret = BLK_STS_IOERR;
+		goto unlock;
 	}
 
 	/*
@@ -330,11 +365,14 @@ static blk_status_t null_zone_write(struct nullb_cmd *cmd, sector_t sector,
 		else
 			cmd->rq->__sector = sector;
 	} else if (sector != zone->wp) {
-		return BLK_STS_IOERR;
+		ret = BLK_STS_IOERR;
+		goto unlock;
 	}
 
-	if (zone->wp + nr_sectors > zone->start + zone->capacity)
-		return BLK_STS_IOERR;
+	if (zone->wp + nr_sectors > zone->start + zone->capacity) {
+		ret = BLK_STS_IOERR;
+		goto unlock;
+	}
 
 	if (zone->cond == BLK_ZONE_COND_CLOSED) {
 		dev->nr_zones_closed--;
@@ -345,9 +383,11 @@ static blk_status_t null_zone_write(struct nullb_cmd *cmd, sector_t sector,
 	if (zone->cond != BLK_ZONE_COND_EXP_OPEN)
 		zone->cond = BLK_ZONE_COND_IMP_OPEN;
 
+	spin_unlock(&dev->zone_dev_lock);
 	ret = null_process_cmd(cmd, REQ_OP_WRITE, sector, nr_sectors);
+	spin_lock(&dev->zone_dev_lock);
 	if (ret != BLK_STS_OK)
-		return ret;
+		goto unlock;
 
 	zone->wp += nr_sectors;
 	if (zone->wp == zone->start + zone->capacity) {
@@ -357,24 +397,32 @@ static blk_status_t null_zone_write(struct nullb_cmd *cmd, sector_t sector,
 			dev->nr_zones_imp_open--;
 		zone->cond = BLK_ZONE_COND_FULL;
 	}
-	return BLK_STS_OK;
+	ret = BLK_STS_OK;
+
+unlock:
+	spin_unlock(&dev->zone_dev_lock);
+	null_unlock_zone(dev, zno);
+
+	return ret;
 }
 
 static blk_status_t null_open_zone(struct nullb_device *dev, struct blk_zone *zone)
 {
-	blk_status_t ret;
+	blk_status_t ret = BLK_STS_OK;
 
 	if (zone->type == BLK_ZONE_TYPE_CONVENTIONAL)
 		return BLK_STS_IOERR;
 
+	spin_lock(&dev->zone_dev_lock);
+
 	switch (zone->cond) {
 	case BLK_ZONE_COND_EXP_OPEN:
 		/* open operation on exp open is not an error */
-		return BLK_STS_OK;
+		goto unlock;
 	case BLK_ZONE_COND_EMPTY:
 		ret = null_check_zone_resources(dev, zone);
 		if (ret != BLK_STS_OK)
-			return ret;
+			goto unlock;
 		break;
 	case BLK_ZONE_COND_IMP_OPEN:
 		dev->nr_zones_imp_open--;
@@ -382,35 +430,41 @@ static blk_status_t null_open_zone(struct nullb_device *dev, struct blk_zone *zo
 	case BLK_ZONE_COND_CLOSED:
 		ret = null_check_zone_resources(dev, zone);
 		if (ret != BLK_STS_OK)
-			return ret;
+			goto unlock;
 		dev->nr_zones_closed--;
 		break;
 	case BLK_ZONE_COND_FULL:
 	default:
-		return BLK_STS_IOERR;
+		ret = BLK_STS_IOERR;
+		goto unlock;
 	}
 
 	zone->cond = BLK_ZONE_COND_EXP_OPEN;
 	dev->nr_zones_exp_open++;
 
-	return BLK_STS_OK;
+unlock:
+	spin_unlock(&dev->zone_dev_lock);
+
+	return ret;
 }
 
 static blk_status_t null_finish_zone(struct nullb_device *dev, struct blk_zone *zone)
 {
-	blk_status_t ret;
+	blk_status_t ret = BLK_STS_OK;
 
 	if (zone->type == BLK_ZONE_TYPE_CONVENTIONAL)
 		return BLK_STS_IOERR;
 
+	spin_lock(&dev->zone_dev_lock);
+
 	switch (zone->cond) {
 	case BLK_ZONE_COND_FULL:
 		/* finish operation on full is not an error */
-		return BLK_STS_OK;
+		goto unlock;
 	case BLK_ZONE_COND_EMPTY:
 		ret = null_check_zone_resources(dev, zone);
 		if (ret != BLK_STS_OK)
-			return ret;
+			goto unlock;
 		break;
 	case BLK_ZONE_COND_IMP_OPEN:
 		dev->nr_zones_imp_open--;
@@ -421,28 +475,36 @@ static blk_status_t null_finish_zone(struct nullb_device *dev, struct blk_zone *
 	case BLK_ZONE_COND_CLOSED:
 		ret = null_check_zone_resources(dev, zone);
 		if (ret != BLK_STS_OK)
-			return ret;
+			goto unlock;
 		dev->nr_zones_closed--;
 		break;
 	default:
-		return BLK_STS_IOERR;
+		ret = BLK_STS_IOERR;
+		goto unlock;
 	}
 
 	zone->cond = BLK_ZONE_COND_FULL;
 	zone->wp = zone->start + zone->len;
 
-	return BLK_STS_OK;
+unlock:
+	spin_unlock(&dev->zone_dev_lock);
+
+	return ret;
 }
 
 static blk_status_t null_reset_zone(struct nullb_device *dev, struct blk_zone *zone)
 {
+	blk_status_t ret = BLK_STS_OK;
+
 	if (zone->type == BLK_ZONE_TYPE_CONVENTIONAL)
 		return BLK_STS_IOERR;
+
+	spin_lock(&dev->zone_dev_lock);
 
 	switch (zone->cond) {
 	case BLK_ZONE_COND_EMPTY:
 		/* reset operation on empty is not an error */
-		return BLK_STS_OK;
+		goto unlock;
 	case BLK_ZONE_COND_IMP_OPEN:
 		dev->nr_zones_imp_open--;
 		break;
@@ -455,34 +517,47 @@ static blk_status_t null_reset_zone(struct nullb_device *dev, struct blk_zone *z
 	case BLK_ZONE_COND_FULL:
 		break;
 	default:
-		return BLK_STS_IOERR;
+		ret = BLK_STS_IOERR;
+		goto unlock;
 	}
 
 	zone->cond = BLK_ZONE_COND_EMPTY;
 	zone->wp = zone->start;
 
-	return BLK_STS_OK;
+unlock:
+	spin_unlock(&dev->zone_dev_lock);
+
+	return ret;
 }
 
 static blk_status_t null_zone_mgmt(struct nullb_cmd *cmd, enum req_opf op,
 				   sector_t sector)
 {
 	struct nullb_device *dev = cmd->nq->dev;
-	unsigned int zone_no = null_zone_no(dev, sector);
-	struct blk_zone *zone = &dev->zones[zone_no];
-	blk_status_t ret = BLK_STS_OK;
+	unsigned int zone_no;
+	struct blk_zone *zone;
+	blk_status_t ret;
 	size_t i;
 
-	switch (op) {
-	case REQ_OP_ZONE_RESET_ALL:
+	if (op == REQ_OP_ZONE_RESET_ALL) {
 		for (i = dev->zone_nr_conv; i < dev->nr_zones; i++) {
+			null_lock_zone(dev, i);
 			zone = &dev->zones[i];
 			if (zone->cond != BLK_ZONE_COND_EMPTY) {
 				null_reset_zone(dev, zone);
 				trace_nullb_zone_op(cmd, i, zone->cond);
 			}
+			null_unlock_zone(dev, i);
 		}
 		return BLK_STS_OK;
+	}
+
+	zone_no = null_zone_no(dev, sector);
+	zone = &dev->zones[zone_no];
+
+	null_lock_zone(dev, zone_no);
+
+	switch (op) {
 	case REQ_OP_ZONE_RESET:
 		ret = null_reset_zone(dev, zone);
 		break;
@@ -496,11 +571,14 @@ static blk_status_t null_zone_mgmt(struct nullb_cmd *cmd, enum req_opf op,
 		ret = null_finish_zone(dev, zone);
 		break;
 	default:
-		return BLK_STS_NOTSUPP;
+		ret = BLK_STS_NOTSUPP;
+		break;
 	}
 
 	if (ret == BLK_STS_OK)
 		trace_nullb_zone_op(cmd, zone_no, zone->cond);
+
+	null_unlock_zone(dev, zone_no);
 
 	return ret;
 }
@@ -509,9 +587,7 @@ blk_status_t null_process_zoned_cmd(struct nullb_cmd *cmd, enum req_opf op,
 				    sector_t sector, sector_t nr_sectors)
 {
 	blk_status_t sts;
-	struct nullb_device *dev = cmd->nq->dev;
 
-	spin_lock_irq(&dev->zone_lock);
 	switch (op) {
 	case REQ_OP_WRITE:
 		sts = null_zone_write(cmd, sector, nr_sectors, false);
@@ -529,7 +605,6 @@ blk_status_t null_process_zoned_cmd(struct nullb_cmd *cmd, enum req_opf op,
 	default:
 		sts = null_process_cmd(cmd, op, sector, nr_sectors);
 	}
-	spin_unlock_irq(&dev->zone_lock);
 
 	return sts;
 }
