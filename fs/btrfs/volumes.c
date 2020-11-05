@@ -1419,8 +1419,14 @@ static bool contains_pending_extent(struct btrfs_device *device, u64 *start,
 static inline u64 dev_extent_search_start_zoned(struct btrfs_device *device,
 						u64 start)
 {
-	start = max_t(u64, start,
-		      max_t(u64, device->zone_info->zone_size, SZ_1M));
+	u64 tmp;
+
+	if (device->zone_info->zone_size > SZ_1M)
+		tmp = device->zone_info->zone_size;
+	else
+		tmp = SZ_1M;
+	if (start < tmp)
+		start = tmp;
 
 	return btrfs_align_offset_to_zone(device, start);
 }
