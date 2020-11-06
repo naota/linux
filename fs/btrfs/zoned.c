@@ -295,7 +295,7 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device)
 
 	rcu_read_lock();
 	if (device->fs_info)
-		btrfs_info(device->fs_info,
+		btrfs_info_in_rcu(device->fs_info,
 			"host-%s zoned block device %s, %u zones of %llu bytes",
 			bdev_zoned_model(bdev) == BLK_ZONED_HM ? "managed" : "aware",
 			rcu_str_deref(device->name), zone_info->nr_zones,
