@@ -348,7 +348,7 @@ int btrfs_check_zoned_mode(struct btrfs_fs_info *fs_info)
 {
 	struct btrfs_fs_devices *fs_devices = fs_info->fs_devices;
 	struct btrfs_device *device;
-	u64 hmzoned_devices = 0;
+	u64 zoned_devices = 0;
 	u64 nr_devices = 0;
 	u64 zone_size = 0;
 	u64 max_zone_append_size = 0;
@@ -368,7 +368,7 @@ int btrfs_check_zoned_mode(struct btrfs_fs_info *fs_info)
 			struct btrfs_zoned_device_info *zone_info =
 				device->zone_info;
 
-			hmzoned_devices++;
+			zoned_devices++;
 			if (!zone_size) {
 				zone_size = zone_info->zone_size;
 			} else if (zone_info->zone_size != zone_size) {
@@ -388,10 +388,10 @@ int btrfs_check_zoned_mode(struct btrfs_fs_info *fs_info)
 		nr_devices++;
 	}
 
-	if (!hmzoned_devices && !incompat_zoned)
+	if (!zoned_devices && !incompat_zoned)
 		goto out;
 
-	if (!hmzoned_devices && incompat_zoned) {
+	if (!zoned_devices && incompat_zoned) {
 		/* No zoned block device found on ZONED FS */
 		btrfs_err(fs_info,
 			  "zoned: no zoned devices found on a zoned filesystem");
@@ -399,14 +399,14 @@ int btrfs_check_zoned_mode(struct btrfs_fs_info *fs_info)
 		goto out;
 	}
 
-	if (hmzoned_devices && !incompat_zoned) {
+	if (zoned_devices && !incompat_zoned) {
 		btrfs_err(fs_info,
 			  "zoned: mode not enabled but zoned device found");
 		ret = -EINVAL;
 		goto out;
 	}
 
-	if (hmzoned_devices != nr_devices) {
+	if (zoned_devices != nr_devices) {
 		btrfs_err(fs_info,
 			  "zoned: cannot mix zoned and regular devices");
 		ret = -EINVAL;
