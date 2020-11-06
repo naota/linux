@@ -1653,8 +1653,8 @@ static void set_avail_alloc_bits(struct btrfs_fs_info *fs_info, u64 flags)
 }
 
 /**
- * __btrfs_rmap_block - Map a physical disk address to a list of logical
- *                      addresses
+ * btrfs_rmap_block - Map a physical disk address to a list of logical
+ *                    addresses
  * @chunk_start:   logical address of block group
  * @bdev:	   physical device to resolve. Can be NULL to indicate any
  *                 device.
@@ -1667,9 +1667,9 @@ static void set_avail_alloc_bits(struct btrfs_fs_info *fs_info, u64 flags)
  * Used primarily to exclude those portions of a block group that contain super
  * block copies.
  */
-int __btrfs_rmap_block(struct btrfs_fs_info *fs_info, u64 chunk_start,
-		       struct block_device *bdev, u64 physical, u64 **logical,
-		       int *naddrs, int *stripe_len)
+int btrfs_rmap_block(struct btrfs_fs_info *fs_info, u64 chunk_start,
+		     struct block_device *bdev, u64 physical, u64 **logical,
+		     int *naddrs, int *stripe_len)
 {
 	struct extent_map *em;
 	struct map_lookup *map;
@@ -1749,14 +1749,6 @@ out:
 	return ret;
 }
 
-EXPORT_FOR_TESTS
-int btrfs_rmap_block(struct btrfs_fs_info *fs_info, u64 chunk_start,
-		     u64 physical, u64 **logical, int *naddrs, int *stripe_len)
-{
-	return __btrfs_rmap_block(fs_info, chunk_start, NULL, physical, logical,
-				  naddrs, stripe_len);
-}
-
 static int exclude_super_stripes(struct btrfs_block_group *cache)
 {
 	struct btrfs_fs_info *fs_info = cache->fs_info;
@@ -1777,7 +1769,7 @@ static int exclude_super_stripes(struct btrfs_block_group *cache)
 
 	for (i = 0; i < BTRFS_SUPER_MIRROR_MAX; i++) {
 		bytenr = btrfs_sb_offset(i);
-		ret = btrfs_rmap_block(fs_info, cache->start,
+		ret = btrfs_rmap_block(fs_info, cache->start, NULL,
 				       bytenr, &logical, &nr, &stripe_len);
 		if (ret)
 			return ret;

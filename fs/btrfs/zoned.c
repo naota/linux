@@ -1104,9 +1104,9 @@ void btrfs_rewrite_logical_zoned(struct btrfs_ordered_extent *ordered)
 	if (WARN_ON(!bdev))
 		return;
 
-	if (WARN_ON(__btrfs_rmap_block(fs_info, orig_logical, bdev,
-				       ordered->physical, &logical, &nr,
-				       &stripe_len)))
+	if (WARN_ON(btrfs_rmap_block(fs_info, orig_logical, bdev,
+				     ordered->physical, &logical, &nr,
+				     &stripe_len)))
 		goto out;
 
 	WARN_ON(nr != 1);
