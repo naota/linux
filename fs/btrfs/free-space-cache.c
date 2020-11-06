@@ -2526,8 +2526,8 @@ out:
 	return ret;
 }
 
-int __btrfs_add_free_space_zoned(struct btrfs_block_group *block_group,
-				 u64 bytenr, u64 size, bool used)
+static int __btrfs_add_free_space_zoned(struct btrfs_block_group *block_group,
+					u64 bytenr, u64 size, bool used)
 {
 	struct btrfs_free_space_ctl *ctl = block_group->free_space_ctl;
 	u64 offset = bytenr - block_group->start;

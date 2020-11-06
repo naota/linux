@@ -114,8 +114,6 @@ int __btrfs_add_free_space(struct btrfs_fs_info *fs_info,
 			   struct btrfs_free_space_ctl *ctl,
 			   u64 bytenr, u64 size,
 			   enum btrfs_trim_state trim_state);
-int __btrfs_add_free_space_zoned(struct btrfs_block_group *block_group,
-				 u64 bytenr, u64 size, bool used);
 int btrfs_add_free_space(struct btrfs_block_group *block_group,
 			 u64 bytenr, u64 size);
 int btrfs_add_free_space_unused(struct btrfs_block_group *block_group,

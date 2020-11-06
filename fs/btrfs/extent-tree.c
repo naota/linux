@@ -2789,6 +2789,9 @@ fetch_cluster_info(struct btrfs_fs_info *fs_info,
 {
 	struct btrfs_free_cluster *ret = NULL;
 
+	if (btrfs_is_zoned(fs_info))
+		return NULL;
+
 	*empty_cluster = 0;
 	if (btrfs_mixed_space_info(space_info))
 		return ret;
@@ -2831,11 +2834,9 @@ static int unpin_extent_range(struct btrfs_fs_info *fs_info,
 			cache = btrfs_lookup_block_group(fs_info, start);
 			BUG_ON(!cache); /* Logic error */
 
-			if (!btrfs_is_zoned(fs_info))
-				cluster = fetch_cluster_info(fs_info,
-							     cache->space_info,
-							     &empty_cluster);
-
+			cluster = fetch_cluster_info(fs_info,
+						     cache->space_info,
+						     &empty_cluster);
 			empty_cluster <<= 1;
 		}
 
