@@ -3059,13 +3059,7 @@ static bool btrfs_bio_add_page(struct bio *bio, struct page *page, u64 logical,
 		return false;
 
 	if (bio_op(bio) == REQ_OP_ZONE_APPEND) {
-		struct bio orig_bio;
-
-		memset(&orig_bio, 0, sizeof(orig_bio));
-		bio_copy_dev(&orig_bio, bio);
-		bio_set_dev(bio, btrfs_io_bio(bio)->device->bdev);
 		ret = bio_add_zone_append_page(bio, page, size, pg_offset);
-		bio_copy_dev(bio, &orig_bio);
 	} else {
 		ret = bio_add_page(bio, page, size, pg_offset);
 	}
