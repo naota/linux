@@ -807,16 +807,18 @@ static int emulate_write_pointer(struct btrfs_block_group *cache,
 	key.offset = 0;
 
 	ret = btrfs_search_slot(NULL, root, &key, path, 0, 0);
-	if (ret != 0) {
-		if (ret < 0)
-			ret = -EUCLEAN;
+	/* We should not find the exact match */
+	if (ret <= 0) {
+		ret = -EUCLEAN;
 		goto out;
 	}
 
 	ret = btrfs_previous_extent_item(root, path, cache->start);
 	if (ret) {
-		if (ret == 1)
+		if (ret == 1) {
+			ret = 0;
 			*offset_ret = 0;
+		}
 		goto out;
 	}
 
@@ -970,6 +972,10 @@ int btrfs_load_block_group_zone_info(struct btrfs_block_group *cache)
 		if (ret || map->num_stripes == num_conventional) {
 			if (!ret)
 				cache->alloc_offset = emulated_offset;
+			else
+				btrfs_err(fs_info,
+			"zoned: failed to emulate write pointer of bg %llu",
+					  cache->start);
 			goto out;
 		}
 	}
