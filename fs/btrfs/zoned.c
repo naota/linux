@@ -807,9 +807,11 @@ static int emulate_write_pointer(struct btrfs_block_group *cache,
 	key.offset = 0;
 
 	ret = btrfs_search_slot(NULL, root, &key, path, 0, 0);
-	if (ret < 0)
+	if (ret != 0) {
+		if (ret < 0)
+			ret = -EUCLEAN;
 		goto out;
-	ASSERT(ret != 0);
+	}
 
 	ret = btrfs_previous_extent_item(root, path, cache->start);
 	if (ret) {
