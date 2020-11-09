@@ -688,11 +688,11 @@ u64 btrfs_find_allocatable_zones(struct btrfs_device *device, u64 hole_start,
 			u32 sb_zone;
 			u64 sb_pos;
 
-			sb_zone = sb_zone_number(zinfo->zone_size, i);
+			sb_zone = sb_zone_number(shift, i);
 			if (!(end <= sb_zone ||
 			      sb_zone + BTRFS_NR_SB_LOG_ZONES <= begin)) {
 				have_sb = true;
-				pos = (sb_zone + BTRFS_NR_SB_LOG_ZONES) << shift;
+				pos = ((u64)sb_zone + BTRFS_NR_SB_LOG_ZONES) << shift;
 				break;
 			}
 
