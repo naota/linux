@@ -447,9 +447,7 @@ static int mark_block_group_to_copy(struct btrfs_fs_info *fs_info,
 	struct btrfs_root *root = fs_info->dev_root;
 	struct btrfs_dev_extent *dev_extent = NULL;
 	struct btrfs_block_group *cache;
-	struct extent_buffer *l;
 	struct btrfs_trans_handle *trans;
-	int slot;
 	int ret = 0;
 	u64 chunk_offset, length;
 
@@ -460,8 +458,10 @@ static int mark_block_group_to_copy(struct btrfs_fs_info *fs_info,
 	mutex_lock(&fs_info->chunk_mutex);
 
 	/* Ensure we don't have pending new block group */
+	spin_lock(&fs_info->trans_lock);
 	while (fs_info->running_transaction &&
 	       !list_empty(&fs_info->running_transaction->dev_update_list)) {
+		spin_unlock(&fs_info->trans_lock);
 		mutex_unlock(&fs_info->chunk_mutex);
 		trans = btrfs_attach_transaction(root);
 		if (IS_ERR(trans)) {
@@ -470,19 +470,22 @@ static int mark_block_group_to_copy(struct btrfs_fs_info *fs_info,
 			if (ret == -ENOENT)
 				continue;
 			else
-				goto out;
+				goto unlock;
 		}
 
 		ret = btrfs_commit_transaction(trans);
 		mutex_lock(&fs_info->chunk_mutex);
 		if (ret)
-			goto out;
+			goto unlock;
+
+		spin_lock(&fs_info->trans_lock);
 	}
+	spin_unlock(&fs_info->trans_lock);
 
 	path = btrfs_alloc_path();
 	if (!path) {
 		ret = -ENOMEM;
-		goto out;
+		goto unlock;
 	}
 
 	path->reada = READA_FORWARD;
@@ -490,30 +493,30 @@ static int mark_block_group_to_copy(struct btrfs_fs_info *fs_info,
 	path->skip_locking = 1;
 
 	key.objectid = src_dev->devid;
-	key.offset = 0ull;
+	key.offset = 0;
 	key.type = BTRFS_DEV_EXTENT_KEY;
 
-	while (1) {
-		ret = btrfs_search_slot(NULL, root, &key, path, 0, 0);
-		if (ret < 0)
-			break;
-		if (ret > 0) {
-			if (path->slots[0] >=
-			    btrfs_header_nritems(path->nodes[0])) {
-				ret = btrfs_next_leaf(root, path);
-				if (ret < 0)
-					break;
-				if (ret > 0) {
-					ret = 0;
-					break;
-				}
-			} else {
+	ret = btrfs_search_slot(NULL, root, &key, path, 0, 0);
+	if (ret < 0)
+		goto free_path;
+	if (ret > 0) {
+		if (path->slots[0] >=
+		    btrfs_header_nritems(path->nodes[0])) {
+			ret = btrfs_next_leaf(root, path);
+			if (ret < 0)
+				goto free_path;
+			if (ret > 0) {
 				ret = 0;
+				goto free_path;
 			}
+		} else {
+			ret = 0;
 		}
+	}
 
-		l = path->nodes[0];
-		slot = path->slots[0];
+	while (1) {
+		struct extent_buffer *l = path->nodes[0];
+		int slot = path->slots[0];
 
 		btrfs_item_key_to_cpu(l, &found_key, slot);
 
@@ -542,12 +545,17 @@ static int mark_block_group_to_copy(struct btrfs_fs_info *fs_info,
 		btrfs_put_block_group(cache);
 
 skip:
-		key.offset = found_key.offset + length;
-		btrfs_release_path(path);
+		ret = btrfs_next_item(root, path);
+		if (ret != 0) {
+			if (ret > 0)
+				ret = 0;
+			break;
+		}
 	}
 
+free_path:
 	btrfs_free_path(path);
-out:
+unlock:
 	mutex_unlock(&fs_info->chunk_mutex);
 
 	return ret;
@@ -576,7 +584,7 @@ bool btrfs_finish_block_group_to_copy(struct btrfs_device *srcdev,
 	spin_unlock(&cache->lock);
 
 	em = btrfs_get_chunk_map(fs_info, chunk_offset, 1);
-	BUG_ON(IS_ERR(em));
+	ASSERT(!IS_ERR(em));
 	map = em->map_lookup;
 
 	num_extents = cur_extent = 0;
