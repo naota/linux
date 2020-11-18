@@ -131,6 +131,31 @@ static inline u32 sb_zone_number(u8 shift, int mirror)
 	return 0;
 }
 
+static int emulate_report_zones(struct btrfs_device *device, u64 pos,
+				struct blk_zone *zones, unsigned int nr_zones)
+{
+	const unsigned int zone_size = 256 * SZ_1M;
+	sector_t bdev_size = device->bdev->bd_part->nr_sects << SECTOR_SHIFT;
+	unsigned int i;
+
+	pos >>= SECTOR_SHIFT;
+	for (i = 0; i < nr_zones; i++) {
+		zones[i].start = i * zone_size + pos;
+		zones[i].len = zone_size;
+		zones[i].capacity = zone_size;
+		zones[i].wp = zones[i].start + zone_size;
+		zones[i].type = BLK_ZONE_TYPE_CONVENTIONAL;
+		zones[i].cond = BLK_ZONE_COND_NOT_WP;
+
+		if (zones[i].wp >= bdev_size) {
+			i++;
+			break;
+		}
+	}
+
+	return i;
+}
+
 static int btrfs_get_dev_zones(struct btrfs_device *device, u64 pos,
 			       struct blk_zone *zones, unsigned int *nr_zones)
 {
@@ -138,6 +163,12 @@ static int btrfs_get_dev_zones(struct btrfs_device *device, u64 pos,
 
 	if (!*nr_zones)
 		return 0;
+
+	if (device->force_zoned) {
+		ret = emulate_report_zones(device, pos, zones, *nr_zones);
+		*nr_zones = ret;
+		return 0;
+	}
 
 	ret = blkdev_report_zones(device->bdev, pos >> SECTOR_SHIFT, *nr_zones,
 				  copy_zone_info_cb, zones);
@@ -165,9 +196,10 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device)
 	struct blk_zone *zones = NULL;
 	unsigned int i, nreported = 0, nr_zones;
 	unsigned int zone_sectors;
+	const bool force_zoned = device->force_zoned;
 	int ret;
 
-	if (!bdev_is_zoned(bdev))
+	if (!bdev_is_zoned(bdev) && !force_zoned)
 		return 0;
 
 	if (device->zone_info)
@@ -177,13 +209,17 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device)
 	if (!zone_info)
 		return -ENOMEM;
 
-	zone_sectors = bdev_zone_sectors(bdev);
+	if (force_zoned)
+		zone_sectors = (256 * SZ_1M) >> SECTOR_SHIFT;
+	else
+		zone_sectors = bdev_zone_sectors(bdev);
+
 	ASSERT(is_power_of_2(zone_sectors));
 	zone_info->zone_size = (u64)zone_sectors << SECTOR_SHIFT;
 	zone_info->zone_size_shift = ilog2(zone_info->zone_size);
 	zone_info->max_zone_append_size =
 		(u64)queue_max_zone_append_sectors(queue) << SECTOR_SHIFT;
-	zone_info->nr_zones = nr_sectors >> ilog2(bdev_zone_sectors(bdev));
+	zone_info->nr_zones = nr_sectors >> ilog2(zone_sectors);
 	if (!IS_ALIGNED(nr_sectors, zone_sectors))
 		zone_info->nr_zones++;
 
@@ -361,7 +397,8 @@ int btrfs_check_zoned_mode(struct btrfs_fs_info *fs_info)
 
 		model = bdev_zoned_model(device->bdev);
 		if (model == BLK_ZONED_HM ||
-		    (model == BLK_ZONED_HA && incompat_zoned)) {
+		    (model == BLK_ZONED_HA && incompat_zoned) ||
+		    device->force_zoned) {
 			struct btrfs_zoned_device_info *zone_info =
 				device->zone_info;
 
