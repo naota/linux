@@ -144,6 +144,9 @@ struct btrfs_device {
 	struct completion kobj_unregister;
 	/* For sysfs/FSID/devinfo/devid/ */
 	struct kobject devid_kobj;
+
+	/* Force zoned mode */
+	bool force_zoned;
 };
 
 /*

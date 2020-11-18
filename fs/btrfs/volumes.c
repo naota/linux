@@ -669,6 +669,16 @@ static int btrfs_open_one_device(struct btrfs_fs_devices *fs_devices,
 	clear_bit(BTRFS_DEV_STATE_IN_FS_METADATA, &device->dev_state);
 	device->mode = flags;
 
+	/* Emulate zoned mode on regular device? */
+	if ((btrfs_super_incompat_flags(disk_super) &
+	     BTRFS_FEATURE_INCOMPAT_ZONED) &&
+	    bdev_zoned_model(device->bdev) == BLK_ZONED_NONE) {
+		btrfs_info(NULL,
+"zoned: incompat zoned flag detected on regular device, forcing zoned mode emulation");
+		device->force_zoned = true;
+	}
+
+	/* Get zone type information of zoned block devices */
 	ret = btrfs_get_dev_zone_info(device);
 	if (ret != 0)
 		goto error_free_page;

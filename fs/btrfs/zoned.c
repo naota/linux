@@ -21,6 +21,8 @@
 /* Pseudo write pointer value for conventional zone */
 #define WP_CONVENTIONAL ((u64)-2)
 
+#define EMULATED_ZONE_SIZE SZ_256M
+
 /* Number of superblock log zones */
 #define BTRFS_NR_SB_LOG_ZONES 2
 
@@ -130,6 +132,31 @@ static inline u32 sb_zone_number(int shift, int mirror)
 	return 0;
 }
 
+static int emulate_report_zones(struct btrfs_device *device, u64 pos,
+				struct blk_zone *zones, unsigned int nr_zones)
+{
+	const unsigned int zone_sectors = EMULATED_ZONE_SIZE >> SECTOR_SHIFT;
+	sector_t bdev_size = device->bdev->bd_part->nr_sects;
+	unsigned int i;
+
+	pos >>= SECTOR_SHIFT;
+	for (i = 0; i < nr_zones; i++) {
+		zones[i].start = i * zone_sectors + pos;
+		zones[i].len = zone_sectors;
+		zones[i].capacity = zone_sectors;
+		zones[i].wp = zones[i].start + zone_sectors;
+		zones[i].type = BLK_ZONE_TYPE_CONVENTIONAL;
+		zones[i].cond = BLK_ZONE_COND_NOT_WP;
+
+		if (zones[i].wp >= bdev_size) {
+			i++;
+			break;
+		}
+	}
+
+	return i;
+}
+
 static int btrfs_get_dev_zones(struct btrfs_device *device, u64 pos,
 			       struct blk_zone *zones, unsigned int *nr_zones)
 {
@@ -137,6 +164,12 @@ static int btrfs_get_dev_zones(struct btrfs_device *device, u64 pos,
 
 	if (!*nr_zones)
 		return 0;
+
+	if (device->force_zoned) {
+		ret = emulate_report_zones(device, pos, zones, *nr_zones);
+		*nr_zones = ret;
+		return 0;
+	}
 
 	ret = blkdev_report_zones(device->bdev, pos >> SECTOR_SHIFT, *nr_zones,
 				  copy_zone_info_cb, zones);
@@ -164,9 +197,10 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device)
 	struct blk_zone *zones = NULL;
 	unsigned int i, nreported = 0, nr_zones;
 	unsigned int zone_sectors;
+	const bool force_zoned = device->force_zoned;
 	int ret;
 
-	if (!bdev_is_zoned(bdev))
+	if (!bdev_is_zoned(bdev) && !force_zoned)
 		return 0;
 
 	if (device->zone_info)
@@ -176,8 +210,12 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device)
 	if (!zone_info)
 		return -ENOMEM;
 
+	if (force_zoned)
+		zone_sectors = EMULATED_ZONE_SIZE >> SECTOR_SHIFT;
+	else
+		zone_sectors = bdev_zone_sectors(bdev);
+
 	nr_sectors = bdev->bd_part->nr_sects;
-	zone_sectors = bdev_zone_sectors(bdev);
 	/* Check if it's power of 2 (see is_power_of_2) */
 	ASSERT(zone_sectors != 0 && (zone_sectors & (zone_sectors - 1)) == 0);
 	zone_info->zone_size = zone_sectors << SECTOR_SHIFT;
@@ -347,8 +385,10 @@ int btrfs_check_zoned_mode(struct btrfs_fs_info *fs_info)
 
 		model = bdev_zoned_model(device->bdev);
 		if (model == BLK_ZONED_HM ||
-		    (model == BLK_ZONED_HA && incompat_zoned)) {
-			struct btrfs_zoned_device_info *zone_info;
+		    (model == BLK_ZONED_HA && incompat_zoned) ||
+		    device->force_zoned) {
+			struct btrfs_zoned_device_info *zone_info =
+				device->zone_info;
 
 			zone_info = device->zone_info;
 			zoned_devices++;
