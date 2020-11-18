@@ -321,6 +321,9 @@ static int btrfs_init_dev_replace_tgtdev(struct btrfs_fs_info *fs_info,
 	set_blocksize(device->bdev, BTRFS_BDEV_BLOCKSIZE);
 	device->fs_devices = fs_info->fs_devices;
 
+	if (btrfs_is_zoned(fs_info) && bdev_zoned_model(bdev) == BLK_ZONED_NONE)
+		device->force_zoned = true;
+
 	ret = btrfs_get_dev_zone_info(device);
 	if (ret)
 		goto error;
