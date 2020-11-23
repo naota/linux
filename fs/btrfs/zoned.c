@@ -18,6 +18,8 @@
 /* Pseudo write pointer value for conventional zone */
 #define WP_CONVENTIONAL ((u64)-2)
 
+#define EMULATED_ZONE_SIZE SZ_256M
+
 /* Number of superblock log zones */
 #define BTRFS_NR_SB_LOG_ZONES 2
 
@@ -134,7 +136,7 @@ static inline u32 sb_zone_number(u8 shift, int mirror)
 static int emulate_report_zones(struct btrfs_device *device, u64 pos,
 				struct blk_zone *zones, unsigned int nr_zones)
 {
-	const unsigned int zone_size = 256 * SZ_1M;
+	const unsigned int zone_size = EMULATED_ZONE_SIZE;
 	sector_t bdev_size = device->bdev->bd_part->nr_sects << SECTOR_SHIFT;
 	unsigned int i;
 
@@ -210,7 +212,7 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device)
 		return -ENOMEM;
 
 	if (force_zoned)
-		zone_sectors = (256 * SZ_1M) >> SECTOR_SHIFT;
+		zone_sectors = EMULATED_ZONE_SIZE >> SECTOR_SHIFT;
 	else
 		zone_sectors = bdev_zone_sectors(bdev);
 
