@@ -136,16 +136,16 @@ static inline u32 sb_zone_number(u8 shift, int mirror)
 static int emulate_report_zones(struct btrfs_device *device, u64 pos,
 				struct blk_zone *zones, unsigned int nr_zones)
 {
-	const unsigned int zone_size = EMULATED_ZONE_SIZE;
-	sector_t bdev_size = device->bdev->bd_part->nr_sects << SECTOR_SHIFT;
+	const unsigned int zone_sectors = EMULATED_ZONE_SIZE >> SECTOR_SHIFT;
+	sector_t bdev_size = device->bdev->bd_part->nr_sects;
 	unsigned int i;
 
 	pos >>= SECTOR_SHIFT;
 	for (i = 0; i < nr_zones; i++) {
-		zones[i].start = i * zone_size + pos;
-		zones[i].len = zone_size;
-		zones[i].capacity = zone_size;
-		zones[i].wp = zones[i].start + zone_size;
+		zones[i].start = i * zone_sectors + pos;
+		zones[i].len = zone_sectors;
+		zones[i].capacity = zone_sectors;
+		zones[i].wp = zones[i].start + zone_sectors;
 		zones[i].type = BLK_ZONE_TYPE_CONVENTIONAL;
 		zones[i].cond = BLK_ZONE_COND_NOT_WP;
 
