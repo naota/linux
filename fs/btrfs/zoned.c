@@ -453,7 +453,8 @@ static int sb_log_location(struct block_device *bdev, struct blk_zone *zones,
 	int ret;
 
 	if (zones[0].type == BLK_ZONE_TYPE_CONVENTIONAL) {
-		*bytenr_ret = zones[0].start << SECTOR_SHIFT;
+		*bytenr_ret = (zones[0].start << SECTOR_SHIFT) +
+			btrfs_sb_offset(0);
 		return 0;
 	}
 
