@@ -136,7 +136,8 @@ static inline u32 sb_zone_number(u8 shift, int mirror)
 static int emulate_report_zones(struct btrfs_device *device, u64 pos,
 				struct blk_zone *zones, unsigned int nr_zones)
 {
-	const unsigned int zone_sectors = EMULATED_ZONE_SIZE >> SECTOR_SHIFT;
+	const sector_t zone_sectors =
+		device->fs_info->zone_size >> SECTOR_SHIFT;
 	sector_t bdev_size = device->bdev->bd_part->nr_sects;
 	unsigned int i;
 
@@ -188,6 +189,74 @@ static int btrfs_get_dev_zones(struct btrfs_device *device, u64 pos,
 	return 0;
 }
 
+static int calculate_emulated_zone_size(struct btrfs_fs_info *fs_info)
+{
+	struct btrfs_path *path;
+	struct btrfs_root *root = fs_info->dev_root;
+	struct btrfs_key key;
+	struct extent_buffer *leaf;
+	struct btrfs_dev_extent *dext;
+	int ret = 0;
+
+	key.objectid = 1;
+	key.type = BTRFS_DEV_EXTENT_KEY;
+	key.offset = 0;
+
+	path = btrfs_alloc_path();
+	if (!path)
+		return -ENOMEM;
+
+	ret = btrfs_search_slot(NULL, root, &key, path, 0, 0);
+	if (ret < 0)
+		goto out;
+
+	if (path->slots[0] >= btrfs_header_nritems(path->nodes[0])) {
+		ret = btrfs_next_item(root, path);
+		if (ret < 0)
+			goto out;
+		/* No dev extents at all? Not good */
+		if (ret > 0) {
+			ret = -EUCLEAN;
+			goto out;
+		}
+	}
+
+	leaf = path->nodes[0];
+	dext = btrfs_item_ptr(leaf, path->slots[0], struct btrfs_dev_extent);
+	fs_info->zone_size = btrfs_dev_extent_length(leaf, dext);
+
+out:
+	btrfs_free_path(path);
+
+	return ret;
+}
+
+int btrfs_get_dev_zone_info_all_devices(struct btrfs_fs_info *fs_info)
+{
+	struct btrfs_fs_devices *fs_devices = fs_info->fs_devices;
+	struct btrfs_device *device;
+	int ret = 0;
+
+	if (!btrfs_fs_incompat(fs_info, ZONED))
+		return 0;
+
+	mutex_lock(&fs_devices->device_list_mutex);
+	list_for_each_entry(device, &fs_devices->devices, dev_list) {
+		if (device->force_zoned && !fs_info->zone_size) {
+			ret = calculate_emulated_zone_size(fs_info);
+			if (ret)
+				break;
+		}
+
+		ret = btrfs_get_dev_zone_info(device);
+		if (ret)
+			break;
+	}
+	mutex_unlock(&fs_devices->device_list_mutex);
+
+	return ret;
+}
+
 int btrfs_get_dev_zone_info(struct btrfs_device *device)
 {
 	struct btrfs_zoned_device_info *zone_info = NULL;
@@ -212,7 +281,7 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device)
 		return -ENOMEM;
 
 	if (force_zoned)
-		zone_sectors = EMULATED_ZONE_SIZE >> SECTOR_SHIFT;
+		zone_sectors = device->fs_info->zone_size >> SECTOR_SHIFT;
 	else
 		zone_sectors = bdev_zone_sectors(bdev);
 
