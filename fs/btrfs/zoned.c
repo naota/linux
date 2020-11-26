@@ -268,6 +268,7 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device)
 	unsigned int i, nreported = 0, nr_zones;
 	unsigned int zone_sectors;
 	const bool force_zoned = device->force_zoned;
+	char *model, *emulated;
 	int ret;
 
 	if (!bdev_is_zoned(bdev) && !force_zoned)
@@ -390,26 +391,21 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device)
 
 	device->zone_info = zone_info;
 
-	/*
-	 * This function is called from open_fs_devices(), which is before
-	 * we set the device->fs_info. So, we use pr_info instead of
-	 * btrfs_info to avoid printing confusing message like "BTRFS info
-	 * (device <unknown>) ..."
-	 */
+	if (bdev_zoned_model(bdev) == BLK_ZONED_HM) {
+		model = "host-managed zoned";
+	} else if (bdev_zoned_model(bdev) == BLK_ZONED_HA) {
+		model = "host-aware zoned";
+	} else if (bdev_zoned_model(bdev) == BLK_ZONED_NONE &&
+		 device->force_zoned) {
+		model = "regular";
+		emulated = "emulated ";
+	}
 
-	rcu_read_lock();
-	if (device->fs_info)
-		btrfs_info(device->fs_info,
-			"host-%s zoned block device %s, %u zones of %llu bytes",
-			bdev_zoned_model(bdev) == BLK_ZONED_HM ? "managed" : "aware",
-			rcu_str_deref(device->name), zone_info->nr_zones,
-			zone_info->zone_size);
-	else
-		pr_info("BTRFS info: host-%s zoned block device %s, %u zones of %llu bytes",
-			bdev_zoned_model(bdev) == BLK_ZONED_HM ? "managed" : "aware",
-			rcu_str_deref(device->name), zone_info->nr_zones,
-			zone_info->zone_size);
-	rcu_read_unlock();
+	btrfs_info_in_rcu(device->fs_info,
+		"%s zoned block device %s, %u %szones of %llu bytes",
+		bdev_zoned_model(bdev) == BLK_ZONED_HM ? "managed" : "aware",
+		rcu_str_deref(device->name), zone_info->nr_zones,
+		zone_info->zone_size);
 
 	return 0;
 
