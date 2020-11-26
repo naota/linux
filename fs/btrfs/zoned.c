@@ -224,6 +224,7 @@ static int calculate_emulated_zone_size(struct btrfs_fs_info *fs_info)
 	leaf = path->nodes[0];
 	dext = btrfs_item_ptr(leaf, path->slots[0], struct btrfs_dev_extent);
 	fs_info->zone_size = btrfs_dev_extent_length(leaf, dext);
+	ret = 0;
 
 out:
 	btrfs_free_path(path);
@@ -242,6 +243,11 @@ int btrfs_get_dev_zone_info_all_devices(struct btrfs_fs_info *fs_info)
 
 	mutex_lock(&fs_devices->device_list_mutex);
 	list_for_each_entry(device, &fs_devices->devices, dev_list) {
+		if (!device->bdev) {
+			ret = -EINVAL;
+			break;
+		}
+
 		if (device->force_zoned && !fs_info->zone_size) {
 			ret = calculate_emulated_zone_size(fs_info);
 			if (ret)
