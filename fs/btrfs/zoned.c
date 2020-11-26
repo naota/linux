@@ -273,6 +273,7 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device)
 	unsigned int i, nreported = 0, nr_zones;
 	unsigned int zone_sectors;
 	const bool force_zoned = device->force_zoned;
+	char *model, *emulated;
 	int ret;
 
 	if (!bdev_is_zoned(bdev) && !force_zoned)
@@ -396,12 +397,22 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device)
 
 	device->zone_info = zone_info;
 
-	/* device->fs_info is not safe to use for printing messages */
-	btrfs_info_in_rcu(NULL,
-			"host-%s zoned block device %s, %u zones of %llu bytes",
-			bdev_zoned_model(bdev) == BLK_ZONED_HM ? "managed" : "aware",
-			rcu_str_deref(device->name), zone_info->nr_zones,
-			zone_info->zone_size);
+	if (bdev_zoned_model(bdev) == BLK_ZONED_HM) {
+		model = "host-managed zoned";
+		emulated = "";
+	} else if (bdev_zoned_model(bdev) == BLK_ZONED_HA) {
+		model = "host-aware zoned";
+		emulated = "";
+	} else if (bdev_zoned_model(bdev) == BLK_ZONED_NONE &&
+		 device->force_zoned) {
+		model = "regular";
+		emulated = "emulated ";
+	}
+
+	btrfs_info_in_rcu(device->fs_info,
+		"%s block device %s, %u %szones of %llu bytes",
+		model, rcu_str_deref(device->name), zone_info->nr_zones,
+		emulated, zone_info->zone_size);
 
 	return 0;
 
