@@ -405,6 +405,7 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device)
 		"%s zoned block device %s, %u %szones of %llu bytes",
 		bdev_zoned_model(bdev) == BLK_ZONED_HM ? "managed" : "aware",
 		rcu_str_deref(device->name), zone_info->nr_zones,
+		emulated ? "emulated " : "",
 		zone_info->zone_size);
 
 	return 0;
