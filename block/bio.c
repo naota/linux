@@ -878,9 +878,6 @@ int bio_add_zone_append_page(struct bio *bio, struct page *page,
 
 	q = bio->bi_disk->queue;
 
-	if (WARN_ON_ONCE(!blk_queue_is_zoned(q)))
-		return 0;
-
 	return bio_add_hw_page(q, bio, page, len, offset,
 			       queue_max_zone_append_sectors(q), &same_page);
 }
