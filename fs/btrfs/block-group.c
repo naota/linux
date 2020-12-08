@@ -1839,6 +1839,7 @@ static int read_one_block_group(struct btrfs_fs_info *info,
 		return -ENOMEM;
 
 	read_block_group_item(cache, path, key);
+	btrfs_release_path(path);
 
 	set_free_space_tree_thresholds(cache);
 
@@ -2009,7 +2010,6 @@ int btrfs_read_block_groups(struct btrfs_fs_info *info)
 			goto error;
 		key.objectid += key.offset;
 		key.offset = 0;
-		btrfs_release_path(path);
 	}
 	btrfs_release_path(path);
 
