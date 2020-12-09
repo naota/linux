@@ -995,6 +995,31 @@ void bio_release_pages(struct bio *bio, bool mark_dirty)
 }
 EXPORT_SYMBOL_GPL(bio_release_pages);
 
+static int __bio_iov_bvec_add_append_pages(struct bio *bio,
+					   struct iov_iter *iter)
+{
+	const struct bio_vec *bv = iter->bvec;
+	struct request_queue *q = bio->bi_disk->queue;
+	unsigned int max_append_sectors = queue_max_zone_append_sectors(q);
+	unsigned int len;
+	size_t size;
+
+	if (WARN_ON_ONCE(!max_append_sectors))
+		return -EINVAL;
+
+	if (WARN_ON_ONCE(iter->iov_offset > bv->bv_len))
+		return -EINVAL;
+
+	len = min_t(size_t, bv->bv_len - iter->iov_offset, iter->count);
+	size = bio_add_hw_page(q, bio, bv->bv_page, len,
+			       bv->bv_offset + iter->iov_offset,
+			       max_append_sectors, false);
+	if (unlikely(size != len))
+		return -EINVAL;
+	iov_iter_advance(iter, size);
+	return 0;
+}
+
 static int __bio_iov_bvec_add_pages(struct bio *bio, struct iov_iter *iter)
 {
 	const struct bio_vec *bv = iter->bvec;
@@ -1145,9 +1170,10 @@ int bio_iov_iter_get_pages(struct bio *bio, struct iov_iter *iter)
 
 	do {
 		if (bio_op(bio) == REQ_OP_ZONE_APPEND) {
-			if (WARN_ON_ONCE(is_bvec))
-				return -EINVAL;
-			ret = __bio_iov_append_get_pages(bio, iter);
+			if (is_bvec)
+				ret = __bio_iov_bvec_add_append_pages(bio, iter);
+			else
+				ret = __bio_iov_append_get_pages(bio, iter);
 		} else {
 			if (is_bvec)
 				ret = __bio_iov_bvec_add_pages(bio, iter);
