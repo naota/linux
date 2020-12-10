@@ -950,7 +950,7 @@ out:
 	return ret;
 }
 
-int btrfs_load_block_group_zone_info(struct btrfs_block_group *cache)
+int btrfs_load_block_group_zone_info(struct btrfs_block_group *cache, bool new)
 {
 	struct btrfs_fs_info *fs_info = cache->fs_info;
 	struct extent_map_tree *em_tree = &fs_info->mapping_tree;
@@ -1076,6 +1076,10 @@ int btrfs_load_block_group_zone_info(struct btrfs_block_group *cache)
 	}
 
 	if (num_conventional > 0) {
+		if (new) {
+			cache->alloc_offset = 0;
+			goto out;
+		}
 		ret = emulate_write_pointer(cache, &emulated_offset);
 		if (ret || map->num_stripes == num_conventional) {
 			if (!ret)
