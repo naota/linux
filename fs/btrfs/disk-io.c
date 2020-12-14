@@ -2967,6 +2967,7 @@ int btrfs_start_pre_rw_mount(struct btrfs_fs_info *fs_info)
 		}
 	}
 
+	ret = btrfs_find_orphan_roots(fs_info);
 out:
 	return ret;
 }
@@ -3380,10 +3381,6 @@ int __cold open_ctree(struct super_block *sb, struct btrfs_fs_devices *fs_device
 			goto fail_qgroup;
 		}
 	}
-
-	ret = btrfs_find_orphan_roots(fs_info);
-	if (ret)
-		goto fail_qgroup;
 
 	fs_info->fs_root = btrfs_get_fs_root(fs_info, BTRFS_FS_TREE_OBJECTID, true);
 	if (IS_ERR(fs_info->fs_root)) {
