@@ -3071,6 +3071,30 @@ struct bio *btrfs_bio_clone_partial(struct bio *orig, int offset, int size)
 	return bio;
 }
 
+static bool btrfs_use_zone_append(struct btrfs_inode *inode,
+				  struct extent_map *em)
+{
+	struct btrfs_fs_info *fs_info = inode->root->fs_info;
+	struct btrfs_block_group *cache;
+	bool ret = false;
+
+	if (!btrfs_is_zoned(fs_info))
+		return false;
+
+	if (!is_data_inode(&inode->vfs_inode))
+		return false;
+
+	cache = btrfs_lookup_block_group(fs_info, em->block_start);
+	ASSERT(cache);
+	if (!cache)
+		return false;
+
+	ret = cache->seq_zone;
+	btrfs_put_block_group(cache);
+
+	return ret;
+}
+
 /**
  * btrfs_bio_add_page	-	attempt to add a page to bio
  * @bio:	destination bio
@@ -3602,9 +3626,6 @@ static noinline_for_stack int __extent_writepage_io(struct btrfs_inode *inode,
 		return 1;
 	}
 
-	if (btrfs_is_zoned(inode->root->fs_info))
-		opf = REQ_OP_ZONE_APPEND;
-
 	/*
 	 * we don't want to touch the inode after unlocking the page,
 	 * so we update the mapping writeback index now
@@ -3639,6 +3660,8 @@ static noinline_for_stack int __extent_writepage_io(struct btrfs_inode *inode,
 		offset = em->block_start + extent_offset;
 		block_start = em->block_start;
 		compressed = test_bit(EXTENT_FLAG_COMPRESSED, &em->flags);
+		if (btrfs_use_zone_append(inode, em))
+			opf = REQ_OP_ZONE_APPEND;
 		free_extent_map(em);
 		em = NULL;
 
