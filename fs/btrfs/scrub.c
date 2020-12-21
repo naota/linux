@@ -1695,6 +1695,9 @@ static void scrub_wr_submit(struct scrub_ctx *sctx)
 
 	sbio = sctx->wr_curr_bio;
 	sctx->wr_curr_bio = NULL;
+
+	if (!sbio->bio)
+		return;
 	WARN_ON(!sbio->bio->bi_disk);
 	scrub_pending_bio_inc(sctx);
 	/* process all writes in a single worker thread. Then the block layer
