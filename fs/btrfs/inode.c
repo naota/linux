@@ -2248,6 +2248,44 @@ static blk_status_t btrfs_submit_bio_start(struct inode *inode, struct bio *bio,
 	return btrfs_csum_one_bio(BTRFS_I(inode), bio, 0, 0);
 }
 
+
+
+bool btrfs_bio_fits_in_ordered_extent(struct page *page, struct bio *bio,
+				      unsigned int size)
+{
+	struct btrfs_inode *inode = BTRFS_I(page->mapping->host);
+	struct btrfs_fs_info *fs_info = inode->root->fs_info;
+	struct btrfs_ordered_extent *ordered;
+	u64 len = bio->bi_iter.bi_size + size;
+	bool ret = true;
+
+	ASSERT(btrfs_is_zoned(fs_info));
+	ASSERT(fs_info->max_zone_append_size > 0);
+	ASSERT(bio_op(bio) == REQ_OP_ZONE_APPEND);
+
+	/* Ordered extent not yet created, so we're good */
+	ordered = btrfs_lookup_ordered_extent(inode, page_offset(page));
+	if (!ordered) {
+		pr_info("No ordered extent for %llu",
+			bio->bi_iter.bi_sector << SECTOR_SHIFT);
+		return ret;
+	}
+
+	if ((bio->bi_iter.bi_sector << SECTOR_SHIFT) + len >
+	    ordered->disk_bytenr + ordered->disk_num_bytes) {
+		ret = false;
+		pr_info("bio %llu + %llu = %llu > ordered %llu + %llu %llu\n",
+			bio->bi_iter.bi_sector << SECTOR_SHIFT, len,
+			(bio->bi_iter.bi_sector << SECTOR_SHIFT) + len,
+			ordered->disk_bytenr, ordered->disk_num_bytes,
+			ordered->disk_bytenr + ordered->disk_num_bytes);
+	}
+
+	btrfs_put_ordered_extent(ordered);
+
+	return ret;
+}
+
 static blk_status_t extract_ordered_extent(struct btrfs_inode *inode,
 					   struct bio *bio, loff_t file_offset)
 {
@@ -2290,6 +2328,8 @@ static blk_status_t extract_ordered_extent(struct btrfs_inode *inode,
 	ordered_end = ordered->disk_bytenr + ordered->disk_num_bytes;
 	/* bio must be in one ordered extent */
 	if (WARN_ON_ONCE(start < ordered->disk_bytenr || end > ordered_end)) {
+		pr_info("bio %llu-%llu ordered %llu-%llu\n", start, end,
+			ordered->disk_bytenr, ordered_end);
 		ret = -EINVAL;
 		goto out;
 	}
