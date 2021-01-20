@@ -2727,6 +2727,13 @@ void btrfs_dump_free_space(struct btrfs_block_group *block_group,
 	struct rb_node *n;
 	int count = 0;
 
+	/* Zoned btrfs does not use free space tree and cluster */
+	if (btrfs_is_zoned(fs_info)) {
+		btrfs_info(fs_info, "free space %llu",
+			   block_group->length - block_group->alloc_offset);
+		return;
+	}
+
 	spin_lock(&ctl->tree_lock);
 	for (n = rb_first(&ctl->free_space_offset); n; n = rb_next(n)) {
 		info = rb_entry(n, struct btrfs_free_space, offset_index);

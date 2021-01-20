@@ -4531,8 +4531,8 @@ again:
 
 			sinfo = btrfs_find_space_info(fs_info, flags);
 			btrfs_err(fs_info,
-			"allocation failed flags %llu, wanted %llu treelog %d",
-				  flags, num_bytes, for_treelog);
+			"allocation failed flags %llu, wanted %llu / %llu treelog %d",
+				  flags, num_bytes, min_alloc_size, for_treelog);
 			if (sinfo)
 				btrfs_dump_space_info(fs_info, sinfo,
 						      num_bytes, 1);
