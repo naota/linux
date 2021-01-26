@@ -143,6 +143,7 @@ static int start_log_trans(struct btrfs_trans_handle *trans,
 	struct btrfs_root *tree_root = fs_info->tree_root;
 	const bool zoned = btrfs_is_zoned(fs_info);
 	int ret = 0;
+	bool created = false;
 
 	/*
 	 * First check if the log root tree was already created. If not, create
@@ -152,8 +153,10 @@ static int start_log_trans(struct btrfs_trans_handle *trans,
 		mutex_lock(&tree_root->log_mutex);
 		if (!fs_info->log_root_tree) {
 			ret = btrfs_init_log_root_tree(trans, fs_info);
-			if (!ret)
+			if (!ret) {
 				set_bit(BTRFS_ROOT_HAS_LOG_TREE, &tree_root->state);
+				created = true;
+			}
 		}
 		mutex_unlock(&tree_root->log_mutex);
 		if (ret)
@@ -183,16 +186,16 @@ again:
 			set_bit(BTRFS_ROOT_MULTI_LOG_TASKS, &root->state);
 		}
 	} else {
-		if (zoned) {
-			mutex_lock(&fs_info->tree_log_mutex);
-			if (fs_info->log_root_tree)
-				ret = -EAGAIN;
-			else
-				ret = btrfs_init_log_root_tree(trans, fs_info);
-			mutex_unlock(&fs_info->tree_log_mutex);
-		}
-		if (ret)
+		/*
+		 * This means fs_info->log_root_tree was already created
+		 * for some other FS trees. Do the full commit not to mix
+		 * nodes from multiple log transactions to do sequential
+		 * writing.
+		 */
+		if (zoned && !created) {
+			ret = -EAGAIN;
 			goto out;
+		}
 
 		ret = btrfs_add_log_tree(trans, root);
 		if (ret)
