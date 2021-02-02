@@ -1303,6 +1303,15 @@ int btrfs_init_log_root_tree(struct btrfs_trans_handle *trans,
 	if (IS_ERR(log_root))
 		return PTR_ERR(log_root);
 
+	if (!btrfs_is_zoned(fs_info)) {
+		int ret = btrfs_alloc_log_tree_node(trans, log_root);
+
+		if (ret) {
+			btrfs_put_root(log_root);
+			return ret;
+		}
+	}
+
 	WARN_ON(fs_info->log_root_tree);
 	fs_info->log_root_tree = log_root;
 	return 0;
