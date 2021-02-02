@@ -3120,6 +3120,14 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
 	 */
 	blk_start_plug(&plug);
 	ret = btrfs_write_marked_extents(fs_info, &log->dirty_log_pages, mark);
+	/*
+	 * There is a hole writing out the extents and cannot proceed it on
+	 * zoned filesystem, which require sequential writing. We can
+	 * ignore the error for now, since we don't wait for completion for
+	 * now.
+	 */
+	if (ret == -EAGAIN)
+		ret = 0;
 	if (ret) {
 		blk_finish_plug(&plug);
 		btrfs_abort_transaction(trans, ret);
@@ -3229,7 +3237,16 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
 					 &log_root_tree->dirty_log_pages,
 					 EXTENT_DIRTY | EXTENT_NEW);
 	blk_finish_plug(&plug);
-	if (ret) {
+	/*
+	 * There is a hole in the extents, and failed to sequential write
+	 * on zoned filesystem. We cannot wait for this write outs, sinc it
+	 * cause a deadlock. Bail out to the full commit, instead.
+	 */
+	if (ret == -EAGAIN) {
+		btrfs_wait_tree_log_extents(log, mark);
+		mutex_unlock(&log_root_tree->log_mutex);
+		goto out_wake_log_root;
+	} else if (ret) {
 		btrfs_set_log_full_commit(trans);
 		btrfs_abort_transaction(trans, ret);
 		mutex_unlock(&log_root_tree->log_mutex);
