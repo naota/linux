@@ -154,6 +154,8 @@ static int start_log_trans(struct btrfs_trans_handle *trans,
 			ret = btrfs_init_log_root_tree(trans, fs_info);
 			if (!ret)
 				set_bit(BTRFS_ROOT_HAS_LOG_TREE, &tree_root->state);
+		} else if (zoned) {
+			ret = -EAGAIN;
 		}
 		mutex_unlock(&tree_root->log_mutex);
 		if (ret)
@@ -183,17 +185,6 @@ again:
 			set_bit(BTRFS_ROOT_MULTI_LOG_TASKS, &root->state);
 		}
 	} else {
-		if (zoned) {
-			mutex_lock(&fs_info->tree_log_mutex);
-			if (fs_info->log_root_tree)
-				ret = -EAGAIN;
-			else
-				ret = btrfs_init_log_root_tree(trans, fs_info);
-			mutex_unlock(&fs_info->tree_log_mutex);
-		}
-		if (ret)
-			goto out;
-
 		ret = btrfs_add_log_tree(trans, root);
 		if (ret)
 			goto out;
