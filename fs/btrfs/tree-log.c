@@ -3110,7 +3110,8 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
 	ret = btrfs_write_marked_extents(fs_info, &log->dirty_log_pages, mark);
 	if (ret) {
 		blk_finish_plug(&plug);
-		btrfs_abort_transaction(trans, ret);
+		if (ret != -EAGAIN)
+			btrfs_abort_transaction(trans, ret);
 		btrfs_set_log_full_commit(trans);
 		mutex_unlock(&root->log_mutex);
 		goto out;
