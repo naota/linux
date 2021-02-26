@@ -269,7 +269,7 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device)
 	sector_t sector = 0;
 	struct blk_zone *zones = NULL;
 	unsigned int i, nreported = 0, nr_zones;
-	unsigned int zone_sectors;
+	sector_t zone_sectors;
 	char *model, *emulated;
 	int ret;
 
