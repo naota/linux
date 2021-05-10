@@ -592,7 +592,7 @@ int btrfs_parse_options(struct btrfs_fs_info *info, char *options,
 		if (btrfs_is_zoned(info)) {
 			btrfs_info(info,
 			"zoned: clearing existing space cache");
-			btrfs_set_super_cache_generation(info->super_copy, 0);
+			btrfs_set_free_space_cache_v1_active(info, false);
 		} else {
 			btrfs_set_opt(info->mount_opt, SPACE_CACHE);
 		}
