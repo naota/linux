@@ -8167,7 +8167,9 @@ static int relocating_repair_kthread(void *data)
 	btrfs_info(fs_info,
 		   "zoned: relocating block group %llu to repair IO failure",
 		   target);
+	sb_start_write(fs_info->sb);
 	ret = btrfs_relocate_chunk(fs_info, target);
+	sb_end_write(fs_info->sb);
 
 out:
 	if (cache)
