@@ -1560,7 +1560,9 @@ void btrfs_reclaim_bgs_work(struct work_struct *work)
 				bg->start, div_u64(bg->used * 100, bg->length),
 				div64_u64(zone_unusable * 100, bg->length));
 		trace_btrfs_reclaim_block_group(bg);
+		sb_start_write(fs_info->sb);
 		ret = btrfs_relocate_chunk(fs_info, bg->start);
+		sb_end_write(fs_info->sb);
 		if (ret && ret != -EAGAIN)
 			btrfs_err(fs_info, "error relocating chunk %llu",
 				  bg->start);
