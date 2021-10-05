@@ -1318,6 +1318,7 @@ bool blk_mq_dispatch_rq_list(struct blk_mq_hw_ctx *hctx, struct list_head *list,
 	int errors, queued;
 	blk_status_t ret = BLK_STS_OK;
 	LIST_HEAD(zone_list);
+	bool zone_restart = false;
 
 	if (list_empty(list))
 		return false;
@@ -1380,8 +1381,10 @@ bool blk_mq_dispatch_rq_list(struct blk_mq_hw_ctx *hctx, struct list_head *list,
 		}
 	} while (!list_empty(list));
 out:
-	if (!list_empty(&zone_list))
+	if (!list_empty(&zone_list)) {
 		list_splice_tail_init(&zone_list, list);
+		zone_restart = true;
+	}
 
 	hctx->dispatched[queued_to_index(queued)]++;
 
@@ -1446,7 +1449,7 @@ out:
 		if (!needs_restart ||
 		    (no_tag && list_empty_careful(&hctx->dispatch_wait.entry)))
 			blk_mq_run_hw_queue(hctx, true);
-		else if (needs_restart && (ret == BLK_STS_RESOURCE ||
+		else if (needs_restart && (ret == BLK_STS_RESOURCE || zone_restart ||
 					   no_budget_avail))
 			blk_mq_delay_run_hw_queue(hctx, BLK_MQ_RESOURCE_DELAY);
 
