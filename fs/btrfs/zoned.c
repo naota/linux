@@ -18,6 +18,13 @@
 #include "fs.h"
 #include "accessors.h"
 
+/* Used to cache the necessary information from blk_zone */
+struct cached_zone {
+	u64 wp;
+	u64 capacity;
+	u8  cond;
+};
+
 /* Maximum number of zones to report per blkdev_report_zones() call */
 #define BTRFS_REPORT_NR_ZONES   4096
 /* Invalid allocation pointer value for missing devices */
@@ -220,6 +227,7 @@ static int btrfs_get_dev_zones(struct btrfs_device *device, u64 pos,
 			       struct blk_zone *zones, unsigned int *nr_zones)
 {
 	struct btrfs_zoned_device_info *zinfo = device->zone_info;
+	struct cached_zone *zone_cache;
 	int ret;
 
 	if (!*nr_zones)
@@ -234,6 +242,8 @@ static int btrfs_get_dev_zones(struct btrfs_device *device, u64 pos,
 	/* Check cache */
 	if (zinfo->zone_cache) {
 		u32 zno;
+		const u8 zone_sectors_shift = zinfo->zone_size_shift - SECTOR_SHIFT;
+		unsigned int i;
 
 		ASSERT(IS_ALIGNED(pos, zinfo->zone_size));
 		zno = pos >> zinfo->zone_size_shift;
@@ -243,8 +253,26 @@ static int btrfs_get_dev_zones(struct btrfs_device *device, u64 pos,
 		 */
 		*nr_zones = min_t(u32, *nr_zones, zinfo->nr_zones - zno);
 
-		memcpy(zones, zinfo->zone_cache + zno,
-		       sizeof(*zinfo->zone_cache) * *nr_zones);
+		for (i = 0; i < *nr_zones; i++) {
+			zone_cache = &zinfo->zone_cache[zno + i];
+
+			zones[i].start = (__u64)(zno + i) << zone_sectors_shift;
+			zones[i].len = (__u64)1 << zone_sectors_shift;
+			zones[i].wp = zone_cache->wp;
+			zones[i].cond = zone_cache->cond;
+			zones[i].capacity = zone_cache->capacity;
+
+			/*
+			 * We don't distinguish SEQWRITE_PREF vs SEQWRITE_REQ in
+			 * zoned btrfs, so we can safely set
+			 * BLK_ZONE_TYPE_SEQWRITE_REQ.
+			 */
+			if (test_bit(zno + i, zinfo->seq_zones))
+				zones[i].type = BLK_ZONE_TYPE_SEQWRITE_REQ;
+			else
+				zones[i].type = BLK_ZONE_TYPE_CONVENTIONAL;
+		}
+
 		return 0;
 	}
 
@@ -404,8 +432,13 @@ static int populate_zone_info(struct blk_zone *zone, unsigned int idx,
 	}
 
 	/* Populate zone cache */
-	if (zone_info->zone_cache)
-		memcpy(&zone_info->zone_cache[idx], zone, sizeof(*zone));
+	if (zone_info->zone_cache) {
+		struct cached_zone *cache = &zone_info->zone_cache[idx];
+
+		cache->wp = zone->wp;
+		cache->cond = zone->cond;
+		cache->capacity = zone->capacity;
+	}
 
 	return 0;
 }
@@ -531,8 +564,9 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device, bool populate_cache)
 	 * use the cache.
 	 */
 	if (populate_cache && bdev_is_zoned(device->bdev)) {
-		zone_info->zone_cache = vzalloc(sizeof(struct blk_zone) *
-						zone_info->nr_zones);
+		zone_info->zone_cache = kvmalloc_array(zone_info->nr_zones,
+						       sizeof(struct cached_zone),
+						       GFP_KERNEL);
 		if (!zone_info->zone_cache) {
 			btrfs_err_in_rcu(device->fs_info,
 				"zoned: failed to allocate zone cache for %s",
@@ -604,7 +638,7 @@ void btrfs_destroy_dev_zone_info(struct btrfs_device *device)
 	bitmap_free(zone_info->active_zones);
 	bitmap_free(zone_info->seq_zones);
 	bitmap_free(zone_info->empty_zones);
-	vfree(zone_info->zone_cache);
+	kvfree(zone_info->zone_cache);
 	kfree(zone_info);
 	device->zone_info = NULL;
 }
@@ -2161,7 +2195,7 @@ void btrfs_free_zone_cache(struct btrfs_fs_info *fs_info)
 	mutex_lock(&fs_devices->device_list_mutex);
 	list_for_each_entry(device, &fs_devices->devices, dev_list) {
 		if (device->zone_info) {
-			vfree(device->zone_info->zone_cache);
+			kvfree(device->zone_info->zone_cache);
 			device->zone_info->zone_cache = NULL;
 		}
 	}

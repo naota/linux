@@ -13,6 +13,7 @@
 
 #define BTRFS_DEFAULT_RECLAIM_THRESH           			(75)
 
+struct cached_zone;
 struct btrfs_zoned_device_info {
 	/*
 	 * Number of zones, zone size and types of zones if bdev is a
@@ -27,7 +28,7 @@ struct btrfs_zoned_device_info {
 	unsigned long *seq_zones;
 	unsigned long *empty_zones;
 	unsigned long *active_zones;
-	struct blk_zone *zone_cache;
+	struct cached_zone *zone_cache;
 	struct blk_zone sb_zones[2 * BTRFS_SUPER_MIRROR_MAX];
 };
 
