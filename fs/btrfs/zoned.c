@@ -233,7 +233,6 @@ static int btrfs_get_dev_zones(struct btrfs_device *device, u64 pos,
 
 	/* Check cache */
 	if (zinfo->zone_cache) {
-		unsigned int i;
 		u32 zno;
 
 		ASSERT(IS_ALIGNED(pos, zinfo->zone_size));
@@ -244,20 +243,9 @@ static int btrfs_get_dev_zones(struct btrfs_device *device, u64 pos,
 		 */
 		*nr_zones = min_t(u32, *nr_zones, zinfo->nr_zones - zno);
 
-		for (i = 0; i < *nr_zones; i++) {
-			struct blk_zone *zone_info;
-
-			zone_info = &zinfo->zone_cache[zno + i];
-			if (!zone_info->len)
-				break;
-		}
-
-		if (i == *nr_zones) {
-			/* Cache hit on all the zones */
-			memcpy(zones, zinfo->zone_cache + zno,
-			       sizeof(*zinfo->zone_cache) * *nr_zones);
-			return 0;
-		}
+		memcpy(zones, zinfo->zone_cache + zno,
+		       sizeof(*zinfo->zone_cache) * *nr_zones);
+		return 0;
 	}
 
 	ret = blkdev_report_zones(device->bdev, pos >> SECTOR_SHIFT, *nr_zones,
@@ -272,14 +260,6 @@ static int btrfs_get_dev_zones(struct btrfs_device *device, u64 pos,
 	*nr_zones = ret;
 	if (!ret)
 		return -EIO;
-
-	/* Populate cache */
-	if (zinfo->zone_cache) {
-		u32 zno = pos >> zinfo->zone_size_shift;
-
-		memcpy(zinfo->zone_cache + zno, zones,
-		       sizeof(*zinfo->zone_cache) * *nr_zones);
-	}
 
 	return 0;
 }
