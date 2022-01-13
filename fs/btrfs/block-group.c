@@ -1931,6 +1931,16 @@ next:
 		 * long.  Prioritize cleaning up unused block groups.
 		 */
 		btrfs_delete_unused_bgs(fs_info);
+
+		sb_end_write(fs_info->sb);
+		btrfs_exclop_finish(fs_info);
+
+		cond_resched();
+
+		if (!btrfs_exclop_start(fs_info, BTRFS_EXCLOP_BALANCE))
+			goto end;
+		sb_start_write(fs_info->sb);
+
 		/*
 		 * If we are interrupted by a balance, we can just bail out. The
 		 * cleaner thread restart again if necessary.
