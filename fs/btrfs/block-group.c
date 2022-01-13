@@ -1830,6 +1830,18 @@ void btrfs_reclaim_bgs_work(struct work_struct *work)
 
 next:
 		btrfs_put_block_group(bg);
+
+		/* let other operations to go */
+		mutex_unlock(&fs_info->reclaim_bgs_lock);
+		sb_end_write(fs_info->sb);
+		btrfs_exclop_finish(fs_info);
+
+		cond_resched();
+
+		if (!btrfs_exclop_start(fs_info, BTRFS_EXCLOP_BALANCE))
+			return;
+		sb_start_write(fs_info->sb);
+		mutex_lock(&fs_info->reclaim_bgs_lock);
 		spin_lock(&fs_info->unused_bgs_lock);
 	}
 	spin_unlock(&fs_info->unused_bgs_lock);
