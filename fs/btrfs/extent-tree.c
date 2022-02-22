@@ -3751,6 +3751,43 @@ static int do_allocation_clustered(struct btrfs_block_group *block_group,
  *     fs_info::treelog_bg_lock
  */
 
+static void dump_zoned_block_groups(struct btrfs_fs_info *fs_info)
+{
+	struct btrfs_block_group *block_group;
+	struct btrfs_device *device;
+	int n = 0;
+
+	btrfs_info(fs_info, "Dump active block groups");
+	spin_lock(&fs_info->zone_active_bgs_lock);
+	list_for_each_entry(block_group, &fs_info->zone_active_bgs,
+			    active_bg_list) {
+		spin_lock(&block_group->lock);
+		btrfs_info(fs_info,
+			   "block group %llu has %llu bytes, %llu used %llu pinned %llu reserved %llu zone_unusable %s",
+			   block_group->start, block_group->length, block_group->used, block_group->pinned,
+			   block_group->reserved, block_group->zone_unusable,
+			   block_group->ro ? "[readonly]" : "");
+		btrfs_info(fs_info, "free space %llu active %d flags %llu",
+			   block_group->zone_capacity - block_group->alloc_offset,
+			   block_group->zone_is_active, block_group->flags);
+		spin_unlock(&block_group->lock);
+		n += block_group->physical_map->num_stripes;
+	}
+	spin_unlock(&fs_info->zone_active_bgs_lock);
+	btrfs_info(fs_info, "nactive in list = %d", n);
+
+	list_for_each_entry (device, &fs_info->fs_devices->devices, dev_list) {
+		if (!device->bdev)
+			continue;
+		if (!device->zone_info)
+			continue;
+		btrfs_info(fs_info, " dev active zones %d bitmap %d",
+			   atomic_read(&device->zone_info->active_zones_left),
+			   bitmap_weight(device->zone_info->active_zones,
+					 device->zone_info->nr_zones));
+	}
+}
+
 /*
  * Simple allocator for sequential-only block group. It only allows sequential
  * allocation. No need to play with trees. This function also reserves the
@@ -3826,6 +3863,12 @@ static int do_allocation_zoned(struct btrfs_block_group *block_group,
 		 * May need to clear fs_info->{treelog,data_reloc}_bg.
 		 * Return the error after taking the locks.
 		 */
+		if (btrfs_test_opt(fs_info, ENOSPC_DEBUG)) {
+			pr_info("dupm max_extent_size %llu min_alloc_size %llu num_bytes %llu\n",
+				ffe_ctl->max_extent_size, ffe_ctl->min_alloc_size,
+				ffe_ctl->num_bytes);
+			dump_zoned_block_groups(fs_info);
+		}
 	}
 
 	spin_lock(&space_info->lock);
