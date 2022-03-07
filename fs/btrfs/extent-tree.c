@@ -3774,6 +3774,14 @@ static int do_allocation_zoned(struct btrfs_block_group *block_group,
 
 	ASSERT(btrfs_is_zoned(block_group->fs_info));
 
+	if (block_group->alloc_offset == block_group->zone_capacity) {
+		if (ffe_ctl->for_treelog)
+			btrfs_clear_treelog_bg(block_group);
+		if (ffe_ctl->for_data_reloc)
+			btrfs_clear_data_reloc_bg(block_group);
+		return 1;
+	}
+
 	/*
 	 * Do not allow non-tree-log blocks in the dedicated tree-log block
 	 * group, and vice versa.
