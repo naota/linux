@@ -4189,12 +4189,24 @@ static int prepare_allocation(struct btrfs_fs_info *fs_info,
 			if (fs_info->treelog_bg)
 				ffe_ctl->hint_byte = fs_info->treelog_bg;
 			spin_unlock(&fs_info->treelog_bg_lock);
-		}
-		if (ffe_ctl->for_data_reloc) {
+		} else if (ffe_ctl->for_data_reloc) {
 			spin_lock(&fs_info->relocation_bg_lock);
 			if (fs_info->data_reloc_bg)
 				ffe_ctl->hint_byte = fs_info->data_reloc_bg;
 			spin_unlock(&fs_info->relocation_bg_lock);
+		} else if (ffe_ctl->flags & BTRFS_BLOCK_GROUP_DATA) {
+			struct btrfs_block_group *block_group;
+
+			down_read(&space_info->groups_sem);
+			list_for_each_entry_reverse(block_group,
+					    &space_info->block_groups[ffe_ctl->index], list) {
+				if (block_group->alloc_offset < block_group->zone_capacity &&
+				    block_group->zone_is_active) {
+					ffe_ctl->hint_byte = block_group->start;
+					break;
+				}
+			}
+			up_read(&space_info->groups_sem);
 		}
 		return 0;
 	default:
