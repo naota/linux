@@ -842,6 +842,8 @@ struct btrfs_fs_info {
 	/* Updates are not protected by any lock */
 	struct btrfs_commit_stats commit_stats;
 
+	unsigned int max_active_zones_limit;
+
 	/*
 	 * Last generation where we dropped a non-relocation root.
 	 * Use btrfs_set_last_root_drop_gen() and btrfs_get_last_root_drop_gen()
