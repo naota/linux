@@ -82,6 +82,9 @@ struct btrfs_fs_context {
 	u32 commit_interval;
 	u32 metadata_ratio;
 	u32 thread_pool_size;
+#ifdef CONFIG_BTRFS_DEBUG
+	u32 max_active_zones_limit;
+#endif
 	unsigned long long mount_opt;
 	unsigned long compress_type:4;
 	int compress_level;
@@ -130,6 +133,7 @@ enum {
 	Opt_enospc_debug,
 #ifdef CONFIG_BTRFS_DEBUG
 	Opt_fragment, Opt_fragment_data, Opt_fragment_metadata, Opt_fragment_all,
+	Opt_max_active_zones_limit,
 #endif
 #ifdef CONFIG_BTRFS_FS_REF_VERIFY
 	Opt_ref_verify,
@@ -254,6 +258,7 @@ static const struct fs_parameter_spec btrfs_fs_parameters[] = {
 	fsparam_flag_no("enospc_debug", Opt_enospc_debug),
 #ifdef CONFIG_BTRFS_DEBUG
 	fsparam_enum("fragment", Opt_fragment, btrfs_parameter_fragment),
+	fsparam_u32("max_active_zones_limit", Opt_max_active_zones_limit),
 #endif
 #ifdef CONFIG_BTRFS_FS_REF_VERIFY
 	fsparam_flag("ref_verify", Opt_ref_verify),
@@ -619,6 +624,16 @@ static int btrfs_parse_param(struct fs_context *fc, struct fs_parameter *param)
 				   param->key);
 			return -EINVAL;
 		}
+		break;
+	case Opt_max_active_zones_limit:
+		if (result.uint_32 == 0)
+			btrfs_info(NULL,
+				   "Apply no limit on max_active_zones");
+		else
+			btrfs_info(NULL,
+				   "Limit max_active_zones up to %u",
+				   result.uint_32);
+		ctx->max_active_zones_limit = result.uint_32;
 		break;
 #endif
 #ifdef CONFIG_BTRFS_FS_REF_VERIFY
@@ -1124,6 +1139,9 @@ static int btrfs_show_options(struct seq_file *seq, struct dentry *dentry)
 	if (info->commit_interval != BTRFS_DEFAULT_COMMIT_INTERVAL)
 		seq_printf(seq, ",commit=%u", info->commit_interval);
 #ifdef CONFIG_BTRFS_DEBUG
+	if (info->max_active_zones_limit)
+		seq_printf(seq, ",max_active_zones_limit=%u",
+			   info->max_active_zones_limit);
 	if (btrfs_test_opt(info, FRAGMENT_DATA))
 		seq_puts(seq, ",fragment=data");
 	if (btrfs_test_opt(info, FRAGMENT_METADATA))
@@ -1396,6 +1414,9 @@ static void btrfs_ctx_to_info(struct btrfs_fs_info *fs_info, struct btrfs_fs_con
 	fs_info->mount_opt = ctx->mount_opt;
 	fs_info->compress_type = ctx->compress_type;
 	fs_info->compress_level = ctx->compress_level;
+#ifdef CONFIG_BTRFS_DEBUG
+	fs_info->max_active_zones_limit = ctx->max_active_zones_limit;
+#endif
 }
 
 static void btrfs_info_to_ctx(struct btrfs_fs_info *fs_info, struct btrfs_fs_context *ctx)
@@ -1407,6 +1428,9 @@ static void btrfs_info_to_ctx(struct btrfs_fs_info *fs_info, struct btrfs_fs_con
 	ctx->mount_opt = fs_info->mount_opt;
 	ctx->compress_type = fs_info->compress_type;
 	ctx->compress_level = fs_info->compress_level;
+#ifdef CONFIG_BTRFS_DEBUG
+	ctx->max_active_zones_limit = fs_info->max_active_zones_limit;
+#endif
 }
 
 #define btrfs_info_if_set(fs_info, old_ctx, opt, fmt, args...)			\
