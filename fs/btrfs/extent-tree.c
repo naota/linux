@@ -4026,14 +4026,21 @@ static int can_allocate_chunk(struct btrfs_fs_info *fs_info,
 	case BTRFS_EXTENT_ALLOC_CLUSTERED:
 		return 0;
 	case BTRFS_EXTENT_ALLOC_ZONED:
+		if (btrfs_can_activate_zone(fs_info->fs_devices,
+					    ffe_ctl->flags))
+			return 0;
+
+		if ((ffe_ctl->flags & BTRFS_BLOCK_GROUP_DATA) &&
+		    btrfs_finish_one_bg(fs_info))
+			return 0;
+
 		/*
 		 * If we have enough free space left in an already
 		 * active block group and we can't activate any other
 		 * zone now, do not allow allocating a new chunk and
 		 * let find_free_extent() retry with a smaller size.
 		 */
-		if (ffe_ctl->max_extent_size >= ffe_ctl->min_alloc_size &&
-		    !btrfs_can_activate_zone(fs_info->fs_devices, ffe_ctl->flags))
+		if (ffe_ctl->max_extent_size >= ffe_ctl->min_alloc_size)
 			return -ENOSPC;
 		return 0;
 	default:
