@@ -337,6 +337,40 @@ static u64 calc_available_free_space(struct btrfs_fs_info *fs_info,
 	return avail;
 }
 
+static u64 active_total_bytes(struct btrfs_fs_info *fs_info,
+			      struct btrfs_space_info *space_info)
+{
+	struct btrfs_block_group *bg;
+	u64 total = 0;
+	int index;
+
+	if (!btrfs_is_zoned(fs_info) || (space_info->flags & BTRFS_BLOCK_GROUP_DATA))
+		return space_info->total_bytes;
+
+	spin_lock(&fs_info->treelog_bg_lock);
+
+	for (index = 0; index < BTRFS_NR_RAID_TYPES; index++) {
+		list_for_each_entry(bg, &space_info->block_groups[index], list) {
+			int locked;
+
+			if (bg->start == fs_info->treelog_bg)
+				continue;
+
+			locked = spin_trylock(&bg->lock);
+			if (bg->zone_is_active)
+				total += bg->length;
+			else if (bg->alloc_offset == bg->zone_capacity)
+				total += bg->length;
+			if (locked)
+				spin_unlock(&bg->lock);
+		}
+	}
+
+	spin_unlock(&fs_info->treelog_bg_lock);
+
+	return total;
+}
+
 int btrfs_can_overcommit(struct btrfs_fs_info *fs_info,
 			 struct btrfs_space_info *space_info, u64 bytes,
 			 enum btrfs_reserve_flush_enum flush)
@@ -351,7 +385,7 @@ int btrfs_can_overcommit(struct btrfs_fs_info *fs_info,
 	used = btrfs_space_info_used(space_info, true);
 	avail = calc_available_free_space(fs_info, space_info, flush);
 
-	if (used + bytes < space_info->total_bytes + avail)
+	if (used + bytes < active_total_bytes(fs_info, space_info) + avail)
 		return 1;
 	return 0;
 }
@@ -387,7 +421,7 @@ again:
 		ticket = list_first_entry(head, struct reserve_ticket, list);
 
 		/* Check and see if our ticket can be satisfied now. */
-		if ((used + ticket->bytes <= space_info->total_bytes) ||
+		if ((used + ticket->bytes <= active_total_bytes(fs_info, space_info)) ||
 		    btrfs_can_overcommit(fs_info, space_info, ticket->bytes,
 					 flush)) {
 			btrfs_space_info_update_bytes_may_use(fs_info,
@@ -718,6 +752,7 @@ btrfs_calc_reclaim_metadata_size(struct btrfs_fs_info *fs_info,
 {
 	u64 used;
 	u64 avail;
+	u64 total;
 	u64 to_reclaim = space_info->reclaim_size;
 
 	lockdep_assert_held(&space_info->lock);
@@ -732,8 +767,9 @@ btrfs_calc_reclaim_metadata_size(struct btrfs_fs_info *fs_info,
 	 * space.  If that's the case add in our overage so we make sure to put
 	 * appropriate pressure on the flushing state machine.
 	 */
-	if (space_info->total_bytes + avail < used)
-		to_reclaim += used - (space_info->total_bytes + avail);
+	total = active_total_bytes(fs_info, space_info);
+	if (total + avail < used)
+		to_reclaim += used - (total + avail);
 
 	return to_reclaim;
 }
@@ -743,8 +779,11 @@ static bool need_preemptive_reclaim(struct btrfs_fs_info *fs_info,
 {
 	u64 global_rsv_size = fs_info->global_block_rsv.reserved;
 	u64 ordered, delalloc;
-	u64 thresh = div_factor_fine(space_info->total_bytes, 90);
+	u64 total = active_total_bytes(fs_info, space_info);
+	u64 thresh;
 	u64 used;
+
+	thresh = div_factor_fine(total, 90);
 
 	lockdep_assert_held(&space_info->lock);
 
@@ -807,8 +846,8 @@ static bool need_preemptive_reclaim(struct btrfs_fs_info *fs_info,
 					   BTRFS_RESERVE_FLUSH_ALL);
 	used = space_info->bytes_used + space_info->bytes_reserved +
 	       space_info->bytes_readonly + global_rsv_size;
-	if (used < space_info->total_bytes)
-		thresh += space_info->total_bytes - used;
+	if (used < total)
+		thresh += total - used;
 	thresh >>= space_info->clamp;
 
 	used = space_info->bytes_pinned;
@@ -1525,7 +1564,7 @@ static int __reserve_bytes(struct btrfs_fs_info *fs_info,
 	 * can_overcommit() to ensure we can overcommit to continue.
 	 */
 	if (!pending_tickets &&
-	    ((used + orig_bytes <= space_info->total_bytes) ||
+	    ((used + orig_bytes <= active_total_bytes(fs_info, space_info)) ||
 	     btrfs_can_overcommit(fs_info, space_info, orig_bytes, flush))) {
 		btrfs_space_info_update_bytes_may_use(fs_info, space_info,
 						      orig_bytes);
