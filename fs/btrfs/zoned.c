@@ -1855,7 +1855,7 @@ static int __btrfs_zone_finish(struct btrfs_block_group *block_group, bool nowai
 	}
 
 	if (nowait) {
-		ASSERT(block_group->reserved == 0);
+		// ASSERT(block_group->reserved == 0);
 	} else {
 		spin_unlock(&block_group->lock);
 
