@@ -78,6 +78,8 @@ void btrfs_clear_data_reloc_bg(struct btrfs_block_group *bg);
 void btrfs_free_zone_cache(struct btrfs_fs_info *fs_info);
 bool btrfs_zoned_should_reclaim(struct btrfs_fs_info *fs_info);
 bool btrfs_finish_one_bg(struct btrfs_fs_info *fs_info);
+bool btrfs_zoned_activate_one_bg(struct btrfs_fs_info *fs_info,
+				 struct btrfs_space_info *space_info);
 #else /* CONFIG_BLK_DEV_ZONED */
 static inline int btrfs_get_dev_zone(struct btrfs_device *device, u64 pos,
 				     struct blk_zone *zone)
@@ -248,6 +250,13 @@ static inline bool btrfs_zoned_should_reclaim(struct btrfs_fs_info *fs_info)
 static inline bool btrfs_finish_one_bg(struct btrfs_fs_info *fs_info)
 {
 	return true;
+}
+
+static inline bool btrfs_zoned_activate_one_bg(struct btrfs_fs_info *fs_info,
+					       struct btrfs_space_info *space_info)
+{
+	/* Consider all the BGs are active */
+	return false;
 }
 #endif
 

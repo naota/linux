@@ -1866,6 +1866,10 @@ bool btrfs_zone_activate(struct btrfs_block_group *block_group)
 	list_add_tail(&block_group->active_bg_list, &fs_info->zone_active_bgs);
 	spin_unlock(&fs_info->zone_active_bgs_lock);
 
+	spin_lock(&block_group->space_info->lock);
+	btrfs_try_granting_tickets(fs_info, block_group->space_info);
+	spin_unlock(&block_group->space_info->lock);
+
 	return true;
 
 out_unlock:
@@ -2170,4 +2174,44 @@ bool btrfs_finish_one_bg(struct btrfs_fs_info *fs_info)
 	btrfs_put_block_group(min_bg);
 
 	return ret == 0;
+}
+
+bool btrfs_zoned_activate_one_bg(struct btrfs_fs_info *fs_info,
+				 struct btrfs_space_info *space_info)
+{
+	struct btrfs_block_group *bg;
+	bool need_finish;
+	int index;
+
+	if (!btrfs_is_zoned(fs_info) || (space_info->flags & BTRFS_BLOCK_GROUP_DATA))
+		return false;
+
+	for (;;) {
+		need_finish = false;
+		down_read(&space_info->groups_sem);
+		for (index = 0; index < BTRFS_NR_RAID_TYPES; index++) {
+			list_for_each_entry(bg, &space_info->block_groups[index], list) {
+				if (!spin_trylock(&bg->lock))
+					continue;
+				if (bg->zone_is_active) {
+					spin_unlock(&bg->lock);
+					continue;
+				}
+				spin_unlock(&bg->lock);
+
+				if (btrfs_zone_activate(bg)) {
+					up_read(&space_info->groups_sem);
+					return true;
+				}
+
+				need_finish = true;
+			}
+		}
+		up_read(&space_info->groups_sem);
+
+		if (!need_finish || !btrfs_finish_one_bg(fs_info))
+			break;
+	}
+
+	return false;
 }
