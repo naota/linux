@@ -81,6 +81,8 @@ void btrfs_schedule_zone_finish_bg(struct btrfs_block_group *bg,
 void btrfs_clear_data_reloc_bg(struct btrfs_block_group *bg);
 void btrfs_free_zone_cache(struct btrfs_fs_info *fs_info);
 bool btrfs_finish_one_bg(struct btrfs_fs_info *fs_info);
+void btrfs_zoned_activate_one_bg(struct btrfs_fs_info *fs_info,
+				 struct btrfs_space_info *space_info);
 #else /* CONFIG_BLK_DEV_ZONED */
 static inline int btrfs_get_dev_zone(struct btrfs_device *device, u64 pos,
 				     struct blk_zone *zone)
@@ -247,6 +249,9 @@ static inline bool btrfs_finish_one_bg(struct btrfs_fs_info *fs_info)
 {
 	return true;
 }
+
+static inline void btrfs_zoned_activate_one_bg(struct btrfs_fs_info *fs_info,
+					       struct btrfs_space_info *space_info) { }
 #endif
 
 static inline bool btrfs_dev_is_sequential(struct btrfs_device *device, u64 pos)

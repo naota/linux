@@ -9,6 +9,7 @@
 #include "ordered-data.h"
 #include "transaction.h"
 #include "block-group.h"
+#include "zoned.h"
 
 /*
  * HOW DOES SPACE RESERVATION WORK
@@ -714,6 +715,10 @@ static void flush_space(struct btrfs_fs_info *fs_info,
 				(state == ALLOC_CHUNK) ? CHUNK_ALLOC_NO_FORCE :
 					CHUNK_ALLOC_FORCE);
 		btrfs_end_transaction(trans);
+
+		if (ret == 1)
+			btrfs_zoned_activate_one_bg(fs_info, space_info);
+
 		if (ret > 0 || ret == -ENOSPC)
 			ret = 0;
 		break;
