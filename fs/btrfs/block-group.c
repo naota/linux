@@ -2663,6 +2663,12 @@ int btrfs_inc_block_group_ro(struct btrfs_block_group *cache,
 	ret = btrfs_chunk_alloc(trans, alloc_flags, CHUNK_ALLOC_FORCE);
 	if (ret < 0)
 		goto out;
+	if (btrfs_is_zoned(fs_info) &&
+	    !(cache->flags & BTRFS_BLOCK_GROUP_DATA)) {
+		struct btrfs_space_info *space_info = cache->space_info;
+
+		btrfs_zoned_activate_one_bg(fs_info, space_info);
+	}
 	ret = inc_block_group_ro(cache, 0);
 	if (ret == -ETXTBSY)
 		goto unlock_out;
