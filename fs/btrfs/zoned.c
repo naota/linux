@@ -2101,7 +2101,7 @@ bool btrfs_finish_one_bg(struct btrfs_fs_info *fs_info)
 	return ret == 0;
 }
 
-void btrfs_zoned_activate_one_bg(struct btrfs_fs_info *fs_info,
+bool btrfs_zoned_activate_one_bg(struct btrfs_fs_info *fs_info,
 				 struct btrfs_space_info *space_info)
 {
 	struct btrfs_block_group *bg;
@@ -2110,7 +2110,7 @@ void btrfs_zoned_activate_one_bg(struct btrfs_fs_info *fs_info,
 	int index;
 
 	if (!btrfs_is_zoned(fs_info) || (space_info->flags & BTRFS_BLOCK_GROUP_DATA))
-		return;
+		return false;
 
 	for (;;) {
 		need_finish = false;
@@ -2141,10 +2141,12 @@ void btrfs_zoned_activate_one_bg(struct btrfs_fs_info *fs_info,
 			spin_lock(&space_info->lock);
 			btrfs_try_granting_tickets(fs_info, space_info);
 			spin_unlock(&space_info->lock);
-			return;
+			return true;
 		}
 
 		if (!need_finish || !btrfs_finish_one_bg(fs_info))
 			break;
 	}
+
+	return false;
 }
