@@ -704,7 +704,11 @@ static void flush_space(struct btrfs_fs_info *fs_info,
 		btrfs_end_transaction(trans);
 		break;
 	case ALLOC_CHUNK:
-	case ALLOC_CHUNK_FORCE:
+	case ALLOC_CHUNK_FORCE: {
+		if (btrfs_zoned_activate_one_bg(fs_info, space_info)) {
+			break;
+		}
+
 		trans = btrfs_join_transaction(root);
 		if (IS_ERR(trans)) {
 			ret = PTR_ERR(trans);
@@ -722,6 +726,7 @@ static void flush_space(struct btrfs_fs_info *fs_info,
 		if (ret > 0 || ret == -ENOSPC)
 			ret = 0;
 		break;
+	}
 	case RUN_DELAYED_IPUTS:
 		/*
 		 * If we have pending delayed iputs then we could free up a
