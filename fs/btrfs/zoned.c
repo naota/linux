@@ -1826,6 +1826,10 @@ bool btrfs_zone_activate(struct btrfs_block_group *block_group)
 	list_add_tail(&block_group->active_bg_list, &fs_info->zone_active_bgs);
 	spin_unlock(&fs_info->zone_active_bgs_lock);
 
+	spin_lock(&block_group->space_info->lock);
+	btrfs_try_granting_tickets(fs_info, block_group->space_info);
+	spin_unlock(&block_group->space_info->lock);
+
 	return true;
 
 out_unlock:
@@ -2105,7 +2109,6 @@ bool btrfs_zoned_activate_one_bg(struct btrfs_fs_info *fs_info,
 				 struct btrfs_space_info *space_info)
 {
 	struct btrfs_block_group *bg;
-	bool activated = false;
 	bool need_finish;
 	int index;
 
@@ -2126,23 +2129,14 @@ bool btrfs_zoned_activate_one_bg(struct btrfs_fs_info *fs_info,
 				spin_unlock(&bg->lock);
 
 				if (btrfs_zone_activate(bg)) {
-					activated = true;
-					break;
+					up_read(&space_info->groups_sem);
+					return true;
 				}
 
 				need_finish = true;
 			}
-			if (activated)
-				break;
 		}
 		up_read(&space_info->groups_sem);
-
-		if (activated) {
-			spin_lock(&space_info->lock);
-			btrfs_try_granting_tickets(fs_info, space_info);
-			spin_unlock(&space_info->lock);
-			return true;
-		}
 
 		if (!need_finish || !btrfs_finish_one_bg(fs_info))
 			break;
