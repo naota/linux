@@ -1853,7 +1853,7 @@ static int __btrfs_zone_finish(struct btrfs_block_group *block_group, bool nowai
 	/* Check if we have unwritten allocated space */
 	if ((block_group->flags &
 	     (BTRFS_BLOCK_GROUP_METADATA | BTRFS_BLOCK_GROUP_SYSTEM)) &&
-	    block_group->alloc_offset > block_group->meta_write_pointer) {
+	    block_group->start + block_group->alloc_offset > block_group->meta_write_pointer) {
 		spin_unlock(&block_group->lock);
 		return -EAGAIN;
 	}
