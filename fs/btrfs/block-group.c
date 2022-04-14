@@ -2667,7 +2667,7 @@ int btrfs_inc_block_group_ro(struct btrfs_block_group *cache,
 	    !(cache->flags & BTRFS_BLOCK_GROUP_DATA)) {
 		struct btrfs_space_info *space_info = cache->space_info;
 
-		btrfs_zoned_activate_one_bg(fs_info, space_info);
+		btrfs_zoned_activate_one_bg(fs_info, space_info, true);
 	}
 	ret = inc_block_group_ro(cache, 0);
 	if (ret == -ETXTBSY)
@@ -3893,7 +3893,7 @@ static void reserve_chunk_space(struct btrfs_trans_handle *trans,
 		if (IS_ERR(bg)) {
 			ret = PTR_ERR(bg);
 		} else {
-			btrfs_zoned_activate_one_bg(fs_info, info);
+			btrfs_zoned_activate_one_bg(fs_info, info, true);
 
 			/*
 			 * If we fail to add the chunk item here, we end up

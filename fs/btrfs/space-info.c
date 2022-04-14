@@ -714,7 +714,7 @@ static void flush_space(struct btrfs_fs_info *fs_info,
 		break;
 	case ALLOC_CHUNK:
 	case ALLOC_CHUNK_FORCE: {
-		if (btrfs_zoned_activate_one_bg(fs_info, space_info)) {
+		if (btrfs_zoned_activate_one_bg(fs_info, space_info, false)) {
 			break;
 		}
 
@@ -730,7 +730,7 @@ static void flush_space(struct btrfs_fs_info *fs_info,
 		btrfs_end_transaction(trans);
 
 		if (ret == 1)
-			btrfs_zoned_activate_one_bg(fs_info, space_info);
+			btrfs_zoned_activate_one_bg(fs_info, space_info, true);
 
 		if (ret > 0 || ret == -ENOSPC)
 			ret = 0;
