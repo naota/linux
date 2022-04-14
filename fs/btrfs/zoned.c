@@ -2106,7 +2106,8 @@ bool btrfs_finish_one_bg(struct btrfs_fs_info *fs_info)
 }
 
 bool btrfs_zoned_activate_one_bg(struct btrfs_fs_info *fs_info,
-				 struct btrfs_space_info *space_info)
+				 struct btrfs_space_info *space_info,
+				 bool do_finish)
 {
 	struct btrfs_block_group *bg;
 	bool need_finish;
@@ -2138,7 +2139,7 @@ bool btrfs_zoned_activate_one_bg(struct btrfs_fs_info *fs_info,
 		}
 		up_read(&space_info->groups_sem);
 
-		if (!need_finish || !btrfs_finish_one_bg(fs_info))
+		if (!do_finish || !need_finish || !btrfs_finish_one_bg(fs_info))
 			break;
 	}
 
