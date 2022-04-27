@@ -1032,6 +1032,9 @@ struct btrfs_fs_info {
 	u32 csums_per_leaf;
 	u32 stripesize;
 
+	/* Maximum size of an extent. BTRFS_MAX_EXTENT_SIZE on regular btrfs. */
+	u64 max_extent_size;
+
 	/* Block groups and devices containing active swapfiles. */
 	spinlock_t swapfile_pins_lock;
 	struct rb_root swapfile_pins;
