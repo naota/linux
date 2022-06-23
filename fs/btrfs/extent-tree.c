@@ -4264,16 +4264,23 @@ static int prepare_allocation(struct btrfs_fs_info *fs_info,
 		} else if (ffe_ctl->flags & BTRFS_BLOCK_GROUP_DATA) {
 			struct btrfs_block_group *block_group;
 
-			down_read(&space_info->groups_sem);
-			list_for_each_entry_reverse(block_group,
-					    &space_info->block_groups[ffe_ctl->index], list) {
-				if (block_group->alloc_offset < block_group->zone_capacity &&
-				    block_group->zone_is_active) {
+			spin_lock(&fs_info->zone_active_bgs_lock);
+			list_for_each_entry(block_group, &fs_info->zone_active_bgs,
+					    active_bg_list) {
+				/*
+				 * No lock is OK here because avail is
+				 * monotinically decreasing, and this is
+				 * just a hint.
+				 */
+				u64 avail = block_group->zone_capacity - block_group->alloc_offset;
+
+				if (block_group_bits(block_group, ffe_ctl->flags) &&
+				    avail >= ffe_ctl->num_bytes) {
 					ffe_ctl->hint_byte = block_group->start;
 					break;
 				}
 			}
-			up_read(&space_info->groups_sem);
+			spin_unlock(&fs_info->zone_active_bgs_lock);
 		}
 		return 0;
 	default:
