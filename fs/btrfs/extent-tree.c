@@ -4058,6 +4058,9 @@ static int can_allocate_chunk(struct btrfs_fs_info *fs_info,
 		 */
 		if (ffe_ctl->max_extent_size >= ffe_ctl->min_alloc_size)
 			return -ENOSPC;
+
+		if (ffe_ctl->flags & BTRFS_BLOCK_GROUP_DATA)
+			return -EAGAIN;
 		return 0;
 	default:
 		BUG();
