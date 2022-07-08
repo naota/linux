@@ -1914,6 +1914,8 @@ static int do_zone_finish(struct btrfs_block_group *block_group, bool fully_writ
 {
 	struct btrfs_fs_info *fs_info = block_group->fs_info;
 	struct map_lookup *map;
+	const bool is_metadata = block_group->flags &
+		(BTRFS_BLOCK_GROUP_METADATA | BTRFS_BLOCK_GROUP_SYSTEM);
 	int ret = 0;
 	int i;
 
@@ -1924,8 +1926,7 @@ static int do_zone_finish(struct btrfs_block_group *block_group, bool fully_writ
 	}
 
 	/* Check if we have unwritten allocated space */
-	if ((block_group->flags &
-	     (BTRFS_BLOCK_GROUP_METADATA | BTRFS_BLOCK_GROUP_SYSTEM)) &&
+	if (is_metadata &&
 	    block_group->start + block_group->alloc_offset > block_group->meta_write_pointer) {
 		spin_unlock(&block_group->lock);
 		return -EAGAIN;
@@ -1950,6 +1951,47 @@ static int do_zone_finish(struct btrfs_block_group *block_group, bool fully_writ
 		/* No need to wait for NOCOW writers. Zoned mode does not allow that */
 		btrfs_wait_ordered_roots(fs_info, U64_MAX, block_group->start,
 					 block_group->length);
+
+		/* Wait for extent buffers to be written. */
+		if (is_metadata) {
+			//struct extent_buffer *eb;
+			//unsigned long index;
+			const u64 end = block_group->start + block_group->length;
+
+			struct radix_tree_iter iter;
+			void **slot;
+
+			spin_lock(&fs_info->buffer_lock);
+			/*
+			xa_for_each_range(&fs_info->extent_buffers, index, eb,
+					  block_group->start >> fs_info->sectorsize_bits,
+					  end >> fs_info->sectorsize_bits)
+				wait_on_extent_buffer_writeback(eb);
+			*/
+
+			radix_tree_for_each_slot(slot, &fs_info->buffer_radix, &iter, 0) {
+				struct extent_buffer *eb;
+
+				eb = radix_tree_deref_slot_protected(slot, &fs_info->buffer_lock);
+				if (!eb)
+					continue;
+				/* Shouldn't happen but that kind of thinking creates CVE's */
+				if (radix_tree_exception(eb)) {
+					if (radix_tree_deref_retry(eb))
+						slot = radix_tree_iter_retry(&iter);
+					continue;
+				}
+				if (eb->start < block_group->start ||
+				    eb->start >= end)
+					continue;
+
+				slot = radix_tree_iter_resume(slot, &iter);
+				spin_unlock(&fs_info->buffer_lock);
+				wait_on_extent_buffer_writeback(eb);
+				spin_lock(&fs_info->buffer_lock);
+			}
+			spin_unlock(&fs_info->buffer_lock);
+		}
 
 		spin_lock(&block_group->lock);
 
