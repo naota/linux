@@ -382,6 +382,8 @@ static u64 calc_available_free_space(struct btrfs_fs_info *fs_info,
 static inline u64 writable_total_bytes(struct btrfs_fs_info *fs_info,
 				       struct btrfs_space_info *space_info)
 {
+	u64 treelog = 0;
+
 	/*
 	 * On regular filesystem, all total_bytes are always writable. On zoned
 	 * filesystem, there may be a limitation imposed by max_active_zones.
@@ -392,7 +394,10 @@ static inline u64 writable_total_bytes(struct btrfs_fs_info *fs_info,
 	if (!btrfs_is_zoned(fs_info) || (space_info->flags & BTRFS_BLOCK_GROUP_DATA))
 		return space_info->total_bytes;
 
-	return space_info->active_total_bytes;
+	if (fs_info->treelog_bg)
+		treelog = fs_info->zone_size;
+
+	return space_info->active_total_bytes - treelog;
 }
 
 int btrfs_can_overcommit(struct btrfs_fs_info *fs_info,
