@@ -1090,6 +1090,11 @@ int btrfs_remove_block_group(struct btrfs_trans_handle *trans,
 	spin_unlock(&trans->transaction->dirty_bgs_lock);
 	mutex_unlock(&trans->transaction->cache_write_mutex);
 
+	spin_lock(&fs_info->zone_alloc_list_lock);
+	if (!list_empty(&block_group->zoned_alloc_list))
+		list_del_init(&block_group->zoned_alloc_list);
+	spin_unlock(&fs_info->zone_alloc_list_lock);
+
 	ret = btrfs_remove_free_space_inode(trans, inode, block_group);
 	if (ret)
 		goto out;
@@ -2123,6 +2128,7 @@ static struct btrfs_block_group *btrfs_create_block_group_cache(
 	INIT_LIST_HEAD(&cache->dirty_list);
 	INIT_LIST_HEAD(&cache->io_list);
 	INIT_LIST_HEAD(&cache->active_bg_list);
+	INIT_LIST_HEAD(&cache->zoned_alloc_list);
 	btrfs_init_free_space_ctl(cache, cache->free_space_ctl);
 	atomic_set(&cache->frozen, 0);
 	mutex_init(&cache->free_space_lock);

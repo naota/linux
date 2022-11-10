@@ -1551,6 +1551,9 @@ out:
 	}
 
 	if (!ret) {
+		u64 avail = cache->zone_capacity - cache->alloc_offset;
+		int bucket = btrfs_zoned_alloc_bucket(fs_info, avail);
+
 		cache->meta_write_pointer = cache->alloc_offset + cache->start;
 		if (test_bit(BLOCK_GROUP_FLAG_ZONE_IS_ACTIVE, &cache->runtime_flags)) {
 			btrfs_get_block_group(cache);
@@ -1558,6 +1561,12 @@ out:
 			list_add_tail(&cache->active_bg_list,
 				      &fs_info->zone_active_bgs);
 			spin_unlock(&fs_info->zone_active_bgs_lock);
+		}
+		if (bucket != -1) {
+			spin_lock(&fs_info->zone_alloc_list_lock);
+			list_add_tail(&cache->zoned_alloc_list,
+				      &fs_info->zone_alloc_list[bucket]);
+			spin_unlock(&fs_info->zone_alloc_list_lock);
 		}
 	} else {
 		kfree(cache->physical_map);
@@ -2041,6 +2050,10 @@ static int do_zone_finish(struct btrfs_block_group *block_group, bool fully_writ
 	block_group->free_space_ctl->free_space = 0;
 	btrfs_clear_treelog_bg(block_group);
 	btrfs_clear_data_reloc_bg(block_group);
+	spin_lock(&fs_info->zone_alloc_list_lock);
+	if (!list_empty(&block_group->zoned_alloc_list))
+		list_del_init(&block_group->zoned_alloc_list);
+	spin_unlock(&fs_info->zone_alloc_list_lock);
 	spin_unlock(&block_group->lock);
 
 	map = block_group->physical_map;

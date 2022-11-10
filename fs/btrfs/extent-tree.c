@@ -3676,6 +3676,7 @@ static int do_allocation_zoned(struct btrfs_block_group *block_group,
 	u64 data_reloc_bytenr;
 	int ret = 0;
 	bool skip = false;
+	int cur_bucket, new_bucket;
 
 	ASSERT(btrfs_is_zoned(block_group->fs_info));
 
@@ -3800,6 +3801,18 @@ static int do_allocation_zoned(struct btrfs_block_group *block_group,
 	spin_lock(&ctl->tree_lock);
 	ctl->free_space -= num_bytes;
 	spin_unlock(&ctl->tree_lock);
+
+	cur_bucket = btrfs_zoned_alloc_bucket(fs_info, avail);
+	new_bucket = btrfs_zoned_alloc_bucket(fs_info, avail - num_bytes);
+	if (cur_bucket != new_bucket) {
+		spin_lock(&fs_info->zone_alloc_list_lock);
+		if (new_bucket == -1)
+			list_del_init(&block_group->zoned_alloc_list);
+		else
+			list_move_tail(&block_group->zoned_alloc_list,
+				       &fs_info->zone_alloc_list[new_bucket]);
+		spin_unlock(&fs_info->zone_alloc_list_lock);
+	}
 
 	/*
 	 * We do not check if found_offset is aligned to stripesize. The
@@ -4155,24 +4168,22 @@ static int prepare_allocation(struct btrfs_fs_info *fs_info,
 			spin_unlock(&fs_info->relocation_bg_lock);
 		} else if (ffe_ctl->flags & BTRFS_BLOCK_GROUP_DATA) {
 			struct btrfs_block_group *block_group;
+			int bucket = btrfs_zoned_alloc_bucket(fs_info, ffe_ctl->num_bytes);
+			int i;
 
-			spin_lock(&fs_info->zone_active_bgs_lock);
-			list_for_each_entry(block_group, &fs_info->zone_active_bgs,
-					    active_bg_list) {
-				/*
-				 * No lock is OK here because avail is
-				 * monotinically decreasing, and this is
-				 * just a hint.
-				 */
-				u64 avail = block_group->zone_capacity - block_group->alloc_offset;
+			spin_lock(&fs_info->zone_alloc_list_lock);
+			for (i = bucket; i < BTRFS_NUM_ZONE_ALLOC_LIST; i++) {
+				list_for_each_entry(block_group, &fs_info->zone_alloc_list[i],
+						    zoned_alloc_list) {
+					if (!block_group_bits(block_group, ffe_ctl->flags))
+						continue;
 
-				if (block_group_bits(block_group, ffe_ctl->flags) &&
-				    avail >= ffe_ctl->num_bytes) {
 					ffe_ctl->hint_byte = block_group->start;
-					break;
+					spin_unlock(&fs_info->zone_alloc_list_lock);
+					return  0;
 				}
 			}
-			spin_unlock(&fs_info->zone_active_bgs_lock);
+			spin_unlock(&fs_info->zone_alloc_list_lock);
 		}
 		return 0;
 	default:
