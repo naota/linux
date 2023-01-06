@@ -353,17 +353,90 @@ int btrfs_get_dev_zone_info_all_devices(struct btrfs_fs_info *fs_info)
 	return ret;
 }
 
+static int populate_zone_info(struct blk_zone *zone, unsigned int idx,
+			      void *data)
+{
+	struct btrfs_device *device = data;
+	struct btrfs_zoned_device_info *zone_info = device->zone_info;
+	int i;
+
+	/* Populate bitmaps and track active zones */
+	if (zone->type == BLK_ZONE_TYPE_SEQWRITE_REQ)
+		__set_bit(idx, zone_info->seq_zones);
+
+	switch (zone->cond) {
+	case BLK_ZONE_COND_EMPTY:
+		__set_bit(idx, zone_info->empty_zones);
+		break;
+	case BLK_ZONE_COND_IMP_OPEN:
+	case BLK_ZONE_COND_EXP_OPEN:
+	case BLK_ZONE_COND_CLOSED:
+		__set_bit(idx, zone_info->active_zones);
+		if (zone_info->max_active_zones &&
+		    atomic_dec_return(&zone_info->active_zones_left) < 0) {
+			btrfs_err_in_rcu(device->fs_info,
+		 "zoned: active zones on %s exceeds max_active_zones %u",
+					 rcu_str_deref(device->name),
+					 zone_info->max_active_zones);
+			return -EIO;
+		}
+		/* Overcommit does not work well with active zone tacking. */
+		if (zone_info->max_active_zones)
+			set_bit(BTRFS_FS_NO_OVERCOMMIT, &device->fs_info->flags);
+		break;
+	}
+
+	/* Copy and validate superblock zones */
+	for (i = 0; i < BTRFS_SUPER_MIRROR_MAX; i++) {
+		int sb_pos;
+		u32 sb_zone;
+		struct blk_zone *sb_zones;
+
+		sb_zone = sb_zone_number(zone_info->zone_size_shift, i);
+		if (idx < sb_zone || sb_zone + BTRFS_NR_SB_LOG_ZONES <= idx)
+			continue;
+
+		sb_pos = BTRFS_NR_SB_LOG_ZONES * i + (idx - sb_zone);
+		sb_zones = &zone_info->sb_zones[sb_pos];
+		memcpy(sb_zones, zone, sizeof(*zone));
+
+		if (idx == sb_zone + BTRFS_NR_SB_LOG_ZONES - 1) {
+			u64 sb_wp;
+			int ret;
+
+			/*
+			 * If sb_zones[0] is conventional, always use the
+			 * beginning of the zone to record superblock. No need
+			 * to validate in that case.
+			 */
+			if (sb_zones[0].type == BLK_ZONE_TYPE_CONVENTIONAL)
+				continue;
+
+			ret = sb_write_pointer(device->bdev, sb_zones, &sb_wp);
+			if (ret != -ENOENT && ret) {
+				btrfs_err_in_rcu(
+					device->fs_info,
+		"zoned: super block log zone corrupted devid %llu zone %u",
+					device->devid, sb_zone);
+				return -EUCLEAN;
+			}
+		}
+	}
+
+	/* Populate zone cache */
+	if (zone_info->zone_cache)
+		memcpy(&zone_info->zone_cache[idx], zone, sizeof(*zone));
+
+	return 0;
+}
+
 int btrfs_get_dev_zone_info(struct btrfs_device *device, bool populate_cache)
 {
 	struct btrfs_fs_info *fs_info = device->fs_info;
 	struct btrfs_zoned_device_info *zone_info = NULL;
 	struct block_device *bdev = device->bdev;
 	unsigned int max_active_zones;
-	unsigned int nactive;
 	sector_t nr_sectors;
-	sector_t sector = 0;
-	struct blk_zone *zones = NULL;
-	unsigned int i, nreported = 0, nr_zones;
 	sector_t zone_sectors;
 	char *model, *emulated;
 	int ret;
@@ -452,6 +525,7 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device, bool populate_cache)
 		goto out;
 	}
 	zone_info->max_active_zones = max_active_zones;
+	atomic_set(&zone_info->active_zones_left, max_active_zones);
 
 	zone_info->seq_zones = bitmap_zalloc(zone_info->nr_zones, GFP_KERNEL);
 	if (!zone_info->seq_zones) {
@@ -467,12 +541,6 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device, bool populate_cache)
 
 	zone_info->active_zones = bitmap_zalloc(zone_info->nr_zones, GFP_KERNEL);
 	if (!zone_info->active_zones) {
-		ret = -ENOMEM;
-		goto out;
-	}
-
-	zones = kvcalloc(BTRFS_REPORT_NR_ZONES, sizeof(struct blk_zone), GFP_KERNEL);
-	if (!zones) {
 		ret = -ENOMEM;
 		goto out;
 	}
@@ -494,105 +562,22 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device, bool populate_cache)
 		}
 	}
 
-	/* Get zones type */
-	nactive = 0;
-	while (sector < nr_sectors) {
-		nr_zones = BTRFS_REPORT_NR_ZONES;
-		ret = btrfs_get_dev_zones(device, sector << SECTOR_SHIFT, zones,
-					  &nr_zones);
-		if (ret)
+	if (bdev_zoned_model(bdev) != BLK_ZONED_NONE) {
+		/* Report all the zones and popoulate zone_info's structures */
+		ret = blkdev_report_zones(device->bdev, 0, BLK_ALL_ZONES,
+					  populate_zone_info, device);
+		if (ret < 0)
 			goto out;
 
-		for (i = 0; i < nr_zones; i++) {
-			if (zones[i].type == BLK_ZONE_TYPE_SEQWRITE_REQ)
-				__set_bit(nreported, zone_info->seq_zones);
-			switch (zones[i].cond) {
-			case BLK_ZONE_COND_EMPTY:
-				__set_bit(nreported, zone_info->empty_zones);
-				break;
-			case BLK_ZONE_COND_IMP_OPEN:
-			case BLK_ZONE_COND_EXP_OPEN:
-			case BLK_ZONE_COND_CLOSED:
-				__set_bit(nreported, zone_info->active_zones);
-				nactive++;
-				break;
-			}
-			nreported++;
-		}
-		sector = zones[nr_zones - 1].start + zones[nr_zones - 1].len;
-	}
-
-	if (nreported != zone_info->nr_zones) {
-		btrfs_err_in_rcu(device->fs_info,
-				 "inconsistent number of zones on %s (%u/%u)",
-				 rcu_str_deref(device->name), nreported,
-				 zone_info->nr_zones);
-		ret = -EIO;
-		goto out;
-	}
-
-	if (max_active_zones) {
-		if (nactive > max_active_zones) {
+		if (ret != zone_info->nr_zones) {
 			btrfs_err_in_rcu(device->fs_info,
-			"zoned: %u active zones on %s exceeds max_active_zones %u",
-					 nactive, rcu_str_deref(device->name),
-					 max_active_zones);
+					 "inconsistent number of zones on %s (%u/%u)",
+					 rcu_str_deref(device->name), ret,
+					 zone_info->nr_zones);
 			ret = -EIO;
 			goto out;
 		}
-		atomic_set(&zone_info->active_zones_left,
-			   max_active_zones - nactive);
-		/* Overcommit does not work well with active zone tacking. */
-		set_bit(BTRFS_FS_NO_OVERCOMMIT, &fs_info->flags);
 	}
-
-	/* Validate superblock log */
-	nr_zones = BTRFS_NR_SB_LOG_ZONES;
-	for (i = 0; i < BTRFS_SUPER_MIRROR_MAX; i++) {
-		u32 sb_zone;
-		u64 sb_wp;
-		int sb_pos = BTRFS_NR_SB_LOG_ZONES * i;
-
-		sb_zone = sb_zone_number(zone_info->zone_size_shift, i);
-		if (sb_zone + 1 >= zone_info->nr_zones)
-			continue;
-
-		ret = btrfs_get_dev_zones(device,
-					  zone_start_physical(sb_zone, zone_info),
-					  &zone_info->sb_zones[sb_pos],
-					  &nr_zones);
-		if (ret)
-			goto out;
-
-		if (nr_zones != BTRFS_NR_SB_LOG_ZONES) {
-			btrfs_err_in_rcu(device->fs_info,
-	"zoned: failed to read super block log zone info at devid %llu zone %u",
-					 device->devid, sb_zone);
-			ret = -EUCLEAN;
-			goto out;
-		}
-
-		/*
-		 * If zones[0] is conventional, always use the beginning of the
-		 * zone to record superblock. No need to validate in that case.
-		 */
-		if (zone_info->sb_zones[BTRFS_NR_SB_LOG_ZONES * i].type ==
-		    BLK_ZONE_TYPE_CONVENTIONAL)
-			continue;
-
-		ret = sb_write_pointer(device->bdev,
-				       &zone_info->sb_zones[sb_pos], &sb_wp);
-		if (ret != -ENOENT && ret) {
-			btrfs_err_in_rcu(device->fs_info,
-			"zoned: super block log zone corrupted devid %llu zone %u",
-					 device->devid, sb_zone);
-			ret = -EUCLEAN;
-			goto out;
-		}
-	}
-
-
-	kvfree(zones);
 
 	switch (bdev_zoned_model(bdev)) {
 	case BLK_ZONED_HM:
@@ -613,7 +598,7 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device, bool populate_cache)
 				 bdev_zoned_model(bdev),
 				 rcu_str_deref(device->name));
 		ret = -EOPNOTSUPP;
-		goto out_free_zone_info;
+		goto out;
 	}
 
 	btrfs_info_in_rcu(fs_info,
@@ -624,8 +609,6 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device, bool populate_cache)
 	return 0;
 
 out:
-	kvfree(zones);
-out_free_zone_info:
 	btrfs_destroy_dev_zone_info(device);
 
 	return ret;
