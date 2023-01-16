@@ -13,6 +13,7 @@
 
 #define BTRFS_DEFAULT_RECLAIM_THRESH           			(75)
 
+struct cached_zone;
 struct btrfs_zoned_device_info {
 	/*
 	 * Number of zones, zone size and types of zones if bdev is a
@@ -27,7 +28,7 @@ struct btrfs_zoned_device_info {
 	unsigned long *seq_zones;
 	unsigned long *empty_zones;
 	unsigned long *active_zones;
-	struct blk_zone *zone_cache;
+	struct cached_zone *zone_cache;
 	struct blk_zone sb_zones[2 * BTRFS_SUPER_MIRROR_MAX];
 };
 
@@ -416,6 +417,23 @@ static inline bool btrfs_zoned_bg_is_full(const struct btrfs_block_group *bg)
 {
 	ASSERT(btrfs_is_zoned(bg->fs_info));
 	return (bg->alloc_offset == bg->zone_capacity);
+}
+
+static inline int btrfs_zoned_alloc_bucket(struct btrfs_fs_info *fs_info, u64 avail)
+{
+	u64 bucket_size;
+	unsigned long bucket_size_shift;
+
+	if (avail == 0)
+		return -1;
+	if (avail == fs_info->zone_size)
+		return BTRFS_NUM_ZONE_ALLOC_LIST - 1;
+
+	// unsigned long max_bit = __ffs64(fs_info->zone_size);
+	// unsigned long first_bit = __ffs64(avail);
+	bucket_size = fs_info->zone_size >> const_ilog2(BTRFS_NUM_ZONE_ALLOC_LIST);
+	bucket_size_shift = ilog2(bucket_size);
+	return avail >> bucket_size_shift;
 }
 
 #endif

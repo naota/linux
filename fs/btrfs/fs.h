@@ -349,6 +349,7 @@ struct btrfs_commit_stats {
 	u64 total_commit_dur;
 };
 
+#define BTRFS_NUM_ZONE_ALLOC_LIST 8
 struct btrfs_fs_info {
 	u8 chunk_tree_uuid[BTRFS_UUID_SIZE];
 	unsigned long flags;
@@ -760,6 +761,9 @@ struct btrfs_fs_info {
 
 	spinlock_t zone_active_bgs_lock;
 	struct list_head zone_active_bgs;
+
+	spinlock_t zone_alloc_list_lock;
+	struct list_head zone_alloc_list[BTRFS_NUM_ZONE_ALLOC_LIST];
 
 	/* Updates are not protected by any lock */
 	struct btrfs_commit_stats commit_stats;
