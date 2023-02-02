@@ -2491,18 +2491,40 @@ out:
 	btrfs_put_block_group(block_group);
 }
 
+struct bg_info {
+	u64 avail;
+	struct btrfs_block_group *bg;
+};
+
+static int cmp_bg_info(const void *a, const void *b)
+{
+	const struct bg_info *bg_a = a;
+	const struct bg_info *bg_b = b;
+
+	if (bg_a->avail > bg_b->avail)
+		return 1;
+	if (bg_a->avail < bg_b->avail)
+		return -1;
+	return 0;
+}
+
 int btrfs_zone_finish_one_bg(struct btrfs_fs_info *fs_info)
 {
 	struct btrfs_block_group *block_group;
-	struct btrfs_block_group *min_bg = NULL;
-	u64 min_avail = U64_MAX;
-	int ret;
+	// struct btrfs_block_group *min_bg = NULL;
+	struct bg_info *bg_info;
+	// u64 min_avail = U64_MAX;
+	int nbgs = 0;
+	int i, ret = 0;
+	bool done = false;
+
+	bg_info = kcalloc(32, sizeof(*bg_info), GFP_NOFS);
+	if (!bg_info)
+		return -ENOMEM;
 
 	spin_lock(&fs_info->zone_active_bgs_lock);
 	list_for_each_entry(block_group, &fs_info->zone_active_bgs,
 			    active_bg_list) {
-		u64 avail;
-
 		spin_lock(&block_group->lock);
 		if (block_group->reserved || block_group->alloc_offset == 0 ||
 		    (block_group->flags & BTRFS_BLOCK_GROUP_SYSTEM) ||
@@ -2511,23 +2533,27 @@ int btrfs_zone_finish_one_bg(struct btrfs_fs_info *fs_info)
 			continue;
 		}
 
-		avail = block_group->zone_capacity - block_group->alloc_offset;
-		if (min_avail > avail) {
-			if (min_bg)
-				btrfs_put_block_group(min_bg);
-			min_bg = block_group;
-			min_avail = avail;
-			btrfs_get_block_group(min_bg);
-		}
+		btrfs_get_block_group(block_group);
+		bg_info[nbgs].avail = block_group->zone_capacity - block_group->alloc_offset;
+		bg_info[nbgs].bg = block_group;
 		spin_unlock(&block_group->lock);
+		nbgs++;
 	}
 	spin_unlock(&fs_info->zone_active_bgs_lock);
 
-	if (!min_bg)
+	if (nbgs == 0)
 		return 0;
 
-	ret = btrfs_zone_finish(min_bg);
-	btrfs_put_block_group(min_bg);
+	sort(bg_info, nbgs, sizeof(struct bg_info), cmp_bg_info, NULL);
+
+	for (i = 0; i < nbgs; i++) {
+		if (!done) {
+			ret = btrfs_zone_finish(bg_info[i].bg);
+			if (ret != -ENOSPC && ret != -EAGAIN)
+				done = true;
+		}
+		btrfs_put_block_group(bg_info[i].bg);
+	}
 
 	return ret < 0 ? ret : 1;
 }
