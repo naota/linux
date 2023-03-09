@@ -2109,15 +2109,26 @@ bool btrfs_can_activate_zone(struct btrfs_fs_devices *fs_devices, u64 flags)
 	mutex_lock(&fs_info->chunk_mutex);
 	list_for_each_entry(device, &fs_devices->alloc_list, dev_alloc_list) {
 		struct btrfs_zoned_device_info *zinfo = device->zone_info;
+		const u64 profile = flags & BTRFS_BLOCK_GROUP_PROFILE_MASK;
 
 		if (!device->bdev)
 			continue;
 
-		if (!zinfo->max_active_zones ||
-		    atomic_read(&zinfo->active_zones_left)) {
+		if (!zinfo->max_active_zones) {
 			ret = true;
 			break;
 		}
+
+		switch (profile) {
+		case 0:
+			ret = atomic_read(&zinfo->active_zones_left) >= 1;
+			break;
+		case BTRFS_BLOCK_GROUP_DUP:
+			ret = atomic_read(&zinfo->active_zones_left) >= 2;
+			break;
+		}
+		if (ret)
+			break;
 	}
 	mutex_unlock(&fs_info->chunk_mutex);
 
