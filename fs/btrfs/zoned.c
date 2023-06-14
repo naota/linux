@@ -2443,6 +2443,8 @@ bool btrfs_zoned_should_reclaim(struct btrfs_fs_info *fs_info)
 
 	ASSERT(btrfs_is_zoned(fs_info));
 
+	return true;
+
 	if (fs_info->bg_reclaim_threshold == 0)
 		return false;
 
