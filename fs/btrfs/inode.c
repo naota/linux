@@ -7317,21 +7317,23 @@ static int btrfs_get_blocks_direct_write(struct extent_map **map,
 	 * just use the extent.
 	 *
 	 */
-	if ((em->flags & EXTENT_FLAG_PREALLOC) ||
-	    ((BTRFS_I(inode)->flags & BTRFS_INODE_NODATACOW) &&
-	     em->block_start != EXTENT_MAP_HOLE)) {
-		if (em->flags & EXTENT_FLAG_PREALLOC)
-			type = BTRFS_ORDERED_PREALLOC;
-		else
-			type = BTRFS_ORDERED_NOCOW;
-		len = min(len, em->len - (start - em->start));
-		block_start = em->block_start + (start - em->start);
+	if (em) {
+		if ((em->flags & EXTENT_FLAG_PREALLOC) ||
+		    ((BTRFS_I(inode)->flags & BTRFS_INODE_NODATACOW) &&
+		     em->block_start != EXTENT_MAP_HOLE)) {
+			if (em->flags & EXTENT_FLAG_PREALLOC)
+				type = BTRFS_ORDERED_PREALLOC;
+			else
+				type = BTRFS_ORDERED_NOCOW;
+			len = min(len, em->len - (start - em->start));
+			block_start = em->block_start + (start - em->start);
 
-		if (can_nocow_extent(inode, start, &len, &orig_start,
-				     &orig_block_len, &ram_bytes, false, false) == 1) {
-			bg = btrfs_inc_nocow_writers(fs_info, block_start);
-			if (bg)
-				can_nocow = true;
+			if (can_nocow_extent(inode, start, &len, &orig_start,
+					     &orig_block_len, &ram_bytes, false, false) == 1) {
+				bg = btrfs_inc_nocow_writers(fs_info, block_start);
+				if (bg)
+					can_nocow = true;
+			}
 		}
 	}
 
@@ -7535,7 +7537,11 @@ static int btrfs_dio_iomap_begin(struct inode *inode, loff_t start,
 	if (ret < 0)
 		goto err;
 
-	em = btrfs_get_extent(BTRFS_I(inode), NULL, start, len);
+	if (write && btrfs_is_zoned(fs_info)) {
+		em = NULL;
+	} else {
+		em = btrfs_get_extent(BTRFS_I(inode), NULL, start, len);
+	}
 	if (IS_ERR(em)) {
 		ret = PTR_ERR(em);
 		goto unlock_err;
@@ -7555,8 +7561,8 @@ static int btrfs_dio_iomap_begin(struct inode *inode, loff_t start,
 	 * to buffered IO.  Don't blame me, this is the price we pay for using
 	 * the generic code.
 	 */
-	if (extent_map_is_compressed(em) ||
-	    em->block_start == EXTENT_MAP_INLINE) {
+	if (em && (extent_map_is_compressed(em) ||
+	    em->block_start == EXTENT_MAP_INLINE)) {
 		free_extent_map(em);
 		/*
 		 * If we are in a NOWAIT context, return -EAGAIN in order to
@@ -7574,7 +7580,8 @@ static int btrfs_dio_iomap_begin(struct inode *inode, loff_t start,
 		goto unlock_err;
 	}
 
-	len = min(len, em->len - (start - em->start));
+	if (em)
+		len = min(len, em->len - (start - em->start));
 
 	/*
 	 * If we have a NOWAIT request and the range contains multiple extents
