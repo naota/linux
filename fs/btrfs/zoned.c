@@ -367,7 +367,9 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device, bool populate_cache)
 	struct blk_zone *zones = NULL;
 	unsigned int i, nreported = 0, nr_zones;
 	sector_t zone_sectors;
+	u64 zone_capacity = 0;
 	char *model, *emulated;
+	bool same_capacity = true;
 	int ret;
 
 	/*
@@ -500,6 +502,12 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device, bool populate_cache)
 				nactive++;
 				break;
 			}
+			if (zones[i].capacity && same_capacity) {
+				if (!zone_capacity)
+					zone_capacity = zones[i].capacity;
+				else if (zone_capacity != zones[i].capacity)
+					same_capacity = false;
+			}
 			nreported++;
 		}
 		sector = zones[nr_zones - 1].start + zones[nr_zones - 1].len;
@@ -513,6 +521,9 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device, bool populate_cache)
 		ret = -EIO;
 		goto out;
 	}
+
+	if (same_capacity)
+		zone_info->zone_capacity = zone_capacity << SECTOR_SHIFT;
 
 	if (max_active_zones) {
 		if (nactive > max_active_zones) {
@@ -1309,6 +1320,14 @@ static int btrfs_load_zone_info(struct btrfs_fs_info *fs_info, int zone_idx,
 
 	if (!btrfs_dev_is_sequential(device, info->physical)) {
 		info->alloc_offset = WP_CONVENTIONAL;
+		return 0;
+	}
+
+	if (btrfs_dev_is_empty_zone(device, info->physical) &&
+	    device->zone_info->zone_capacity) {
+		btrfs_dev_clear_zone_empty(device, info->physical);
+		info->alloc_offset = 0;
+		info->capacity = device->zone_info->zone_capacity;
 		return 0;
 	}
 

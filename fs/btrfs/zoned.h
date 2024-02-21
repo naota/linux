@@ -35,6 +35,8 @@ struct btrfs_zoned_device_info {
 	 */
 	u64 zone_size;
 	u8  zone_size_shift;
+	/* */
+	u64 zone_capacity;
 	u32 nr_zones;
 	unsigned int max_active_zones;
 	/*
