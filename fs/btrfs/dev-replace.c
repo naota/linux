@@ -567,6 +567,10 @@ bool btrfs_finish_block_group_to_copy(struct btrfs_device *srcdev,
 	map = btrfs_get_chunk_map(fs_info, chunk_offset, 1);
 	ASSERT(!IS_ERR(map));
 
+	/* Reload the physical_map. */
+	kfree(cache->physical_map);
+	cache->physical_map = btrfs_clone_chunk_map(map, GFP_NOFS);
+
 	num_extents = 0;
 	cur_extent = 0;
 	for (i = 0; i < map->num_stripes; i++) {
