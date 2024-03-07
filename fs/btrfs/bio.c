@@ -614,6 +614,7 @@ static bool should_async_write(struct btrfs_bio *bbio)
 	struct btrfs_fs_devices *fs_devices = bbio->fs_info->fs_devices;
 	enum btrfs_offload_csum_mode csum_mode = READ_ONCE(fs_devices->offload_csum_mode);
 
+	csum_mode = BTRFS_OFFLOAD_CSUM_FORCE_ON;
 	if (csum_mode == BTRFS_OFFLOAD_CSUM_FORCE_OFF)
 		return false;
 
