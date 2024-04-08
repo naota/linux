@@ -8285,6 +8285,8 @@ bool btrfs_repair_one_zone(struct btrfs_fs_info *fs_info, u64 logical)
 	if (btrfs_test_opt(fs_info, DEGRADED))
 		return true;
 
+	return true;
+
 	cache = btrfs_lookup_block_group(fs_info, logical);
 	if (!cache)
 		return true;
