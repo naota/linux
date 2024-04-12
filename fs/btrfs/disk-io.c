@@ -4273,6 +4273,12 @@ void __cold close_ctree(struct btrfs_fs_info *fs_info)
 
 	btrfs_scrub_cancel(fs_info);
 
+	spin_lock(&fs_info->super_lock);
+	if (WARN_ON(READ_ONCE(fs_info->exclusive_operation) != BTRFS_EXCLOP_NONE))
+		btrfs_err(fs_info, "exclusive operation %d is still running at %s",
+			  READ_ONCE(fs_info->exclusive_operation), __func__);
+	spin_unlock(&fs_info->super_lock);
+
 	/* wait for any defraggers to finish */
 	wait_event(fs_info->transaction_wait,
 		   (atomic_read(&fs_info->defrag_running) == 0));
