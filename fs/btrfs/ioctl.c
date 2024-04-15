@@ -455,6 +455,7 @@ void btrfs_exclop_finish(struct btrfs_fs_info *fs_info)
 	WRITE_ONCE(fs_info->exclusive_operation, BTRFS_EXCLOP_NONE);
 	spin_unlock(&fs_info->super_lock);
 	sysfs_notify(&fs_info->fs_devices->fsid_kobj, NULL, "exclusive_operation");
+	wake_up_var(&fs_info->exclusive_operation);
 }
 
 void btrfs_exclop_balance(struct btrfs_fs_info *fs_info,

@@ -8245,6 +8245,12 @@ static int relocating_repair_kthread(void *data)
 		return -EBUSY;
 	}
 
+	if (btrfs_fs_closing(fs_info)) {
+		btrfs_exclop_finish(fs_info);
+		sb_end_write(fs_info->sb);
+		return -EBUSY;
+	}
+
 	mutex_lock(&fs_info->reclaim_bgs_lock);
 
 	/* Ensure block group still exists */

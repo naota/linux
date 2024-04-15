@@ -4273,6 +4273,9 @@ void __cold close_ctree(struct btrfs_fs_info *fs_info)
 
 	btrfs_scrub_cancel(fs_info);
 
+	wait_var_event(&fs_info->exclusive_operation,
+		       READ_ONCE(fs_info->exclusive_operation) == BTRFS_EXCLOP_NONE);
+
 	spin_lock(&fs_info->super_lock);
 	if (WARN_ON(READ_ONCE(fs_info->exclusive_operation) != BTRFS_EXCLOP_NONE))
 		btrfs_err(fs_info, "exclusive operation %d is still running at %s",
