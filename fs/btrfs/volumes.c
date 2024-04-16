@@ -8226,63 +8226,9 @@ bool btrfs_pinned_by_swapfile(struct btrfs_fs_info *fs_info, void *ptr)
 	return node != NULL;
 }
 
-static int relocating_repair_kthread(void *data)
-{
-	struct btrfs_block_group *cache = data;
-	struct btrfs_fs_info *fs_info = cache->fs_info;
-	u64 target;
-	int ret = 0;
-
-	target = cache->start;
-	btrfs_put_block_group(cache);
-
-	sb_start_write(fs_info->sb);
-	if (!btrfs_exclop_start(fs_info, BTRFS_EXCLOP_BALANCE)) {
-		btrfs_info(fs_info,
-			   "zoned: skip relocating block group %llu to repair: EBUSY",
-			   target);
-		sb_end_write(fs_info->sb);
-		return -EBUSY;
-	}
-
-	if (btrfs_fs_closing(fs_info)) {
-		btrfs_exclop_finish(fs_info);
-		sb_end_write(fs_info->sb);
-		return -EBUSY;
-	}
-
-	mutex_lock(&fs_info->reclaim_bgs_lock);
-
-	/* Ensure block group still exists */
-	cache = btrfs_lookup_block_group(fs_info, target);
-	if (!cache)
-		goto out;
-
-	if (!test_bit(BLOCK_GROUP_FLAG_RELOCATING_REPAIR, &cache->runtime_flags))
-		goto out;
-
-	ret = btrfs_may_alloc_data_chunk(fs_info, target);
-	if (ret < 0)
-		goto out;
-
-	btrfs_info(fs_info,
-		   "zoned: relocating block group %llu to repair IO failure",
-		   target);
-	ret = btrfs_relocate_chunk(fs_info, target);
-
-out:
-	if (cache)
-		btrfs_put_block_group(cache);
-	mutex_unlock(&fs_info->reclaim_bgs_lock);
-	btrfs_exclop_finish(fs_info);
-	sb_end_write(fs_info->sb);
-
-	return ret;
-}
-
 bool btrfs_repair_one_zone(struct btrfs_fs_info *fs_info, u64 logical)
 {
-	struct btrfs_block_group *cache;
+	struct btrfs_block_group *bg;
 
 	if (!btrfs_is_zoned(fs_info))
 		return false;
@@ -8291,17 +8237,28 @@ bool btrfs_repair_one_zone(struct btrfs_fs_info *fs_info, u64 logical)
 	if (btrfs_test_opt(fs_info, DEGRADED))
 		return true;
 
-	cache = btrfs_lookup_block_group(fs_info, logical);
-	if (!cache)
+	bg = btrfs_lookup_block_group(fs_info, logical);
+	if (!bg)
 		return true;
 
-	if (test_and_set_bit(BLOCK_GROUP_FLAG_RELOCATING_REPAIR, &cache->runtime_flags)) {
-		btrfs_put_block_group(cache);
+	if (test_and_set_bit(BLOCK_GROUP_FLAG_RELOCATING_REPAIR, &bg->runtime_flags)) {
+		btrfs_put_block_group(bg);
 		return true;
 	}
 
+	spin_lock(&fs_info->unused_bgs_lock);
+	if (list_empty(&bg->bg_list)) {
+		list_add(&bg->bg_list, &fs_info->reclaim_bgs);
+		queue_work(system_unbound_wq, &fs_info->reclaim_bgs_work);
+	} else {
+		btrfs_put_block_group(bg);
+	}
+	spin_unlock(&fs_info->unused_bgs_lock);
+
+	/*
 	kthread_run(relocating_repair_kthread, cache,
 		    "btrfs-relocating-repair");
+	*/
 
 	return true;
 }

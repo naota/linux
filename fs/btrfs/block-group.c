@@ -1741,9 +1741,18 @@ static int reclaim_bgs_cmp(void *unused, const struct list_head *a,
 			   const struct list_head *b)
 {
 	const struct btrfs_block_group *bg1, *bg2;
+	bool repair1, repair2;
 
 	bg1 = list_entry(a, struct btrfs_block_group, bg_list);
 	bg2 = list_entry(b, struct btrfs_block_group, bg_list);
+
+	repair1 = test_bit(BLOCK_GROUP_FLAG_RELOCATING_REPAIR, &bg1->runtime_flags);
+	repair2 = test_bit(BLOCK_GROUP_FLAG_RELOCATING_REPAIR, &bg2->runtime_flags);
+
+	if (repair1 && !repair2)
+		return 0;
+	else if (!repair1 && repair2)
+		return 1;
 
 	return bg1->used > bg2->used;
 }
@@ -1762,6 +1771,9 @@ static bool should_reclaim_block_group(struct btrfs_block_group *bg, u64 bytes_f
 	const u64 new_val = bg->used;
 	const u64 old_val = new_val + bytes_freed;
 	u64 thresh;
+
+	if (test_bit(BLOCK_GROUP_FLAG_RELOCATING_REPAIR, &bg->runtime_flags))
+		return true;
 
 	if (reclaim_thresh == 0)
 		return false;
@@ -1918,6 +1930,8 @@ void btrfs_reclaim_bgs_work(struct work_struct *work)
 			btrfs_dec_block_group_ro(bg);
 			btrfs_err(fs_info, "error relocating chunk %llu",
 				  bg->start);
+		} else {
+			clear_bit(BLOCK_GROUP_FLAG_RELOCATING_REPAIR, &bg->runtime_flags);
 		}
 
 next:

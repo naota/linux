@@ -2437,11 +2437,21 @@ bool btrfs_zoned_should_reclaim(struct btrfs_fs_info *fs_info)
 {
 	struct btrfs_fs_devices *fs_devices = fs_info->fs_devices;
 	struct btrfs_device *device;
+	struct btrfs_block_group *bg;
 	u64 used = 0;
 	u64 total = 0;
 	u64 factor;
 
 	ASSERT(btrfs_is_zoned(fs_info));
+
+	spin_lock(&fs_info->unused_bgs_lock);
+	list_for_each_entry(bg, &fs_info->reclaim_bgs, bg_list) {
+		if (test_bit(BLOCK_GROUP_FLAG_RELOCATING_REPAIR, &bg->runtime_flags)) {
+			spin_unlock(&fs_info->unused_bgs_lock);
+			return true;
+		}
+	}
+	spin_unlock(&fs_info->unused_bgs_lock);
 
 	if (fs_info->bg_reclaim_threshold == 0)
 		return false;
