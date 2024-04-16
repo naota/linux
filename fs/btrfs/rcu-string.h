@@ -20,8 +20,9 @@ struct rcu_string {
 static inline struct rcu_string *rcu_string_strdup(const char *src, gfp_t mask)
 {
 	size_t len = strlen(src) + 1;
-	struct rcu_string *ret = kzalloc(sizeof(struct rcu_string) +
-					 (len * sizeof(char)), mask);
+	struct rcu_string *ret;
+
+	ret = kzalloc(struct_size(ret, str, len), mask);
 	if (!ret)
 		return ret;
 	/* Warn if the source got unexpectedly truncated. */
