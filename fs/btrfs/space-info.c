@@ -15,6 +15,8 @@
 #include "accessors.h"
 #include "extent-tree.h"
 
+#include "zoned.h"
+
 /*
  * HOW DOES SPACE RESERVATION WORK
  *
@@ -835,6 +837,97 @@ static void flush_space(struct btrfs_fs_info *fs_info,
 		 */
 		ret = btrfs_commit_current_transaction(root);
 		break;
+	case RESET_ZONE:
+		if (!btrfs_is_zoned(fs_info))
+			return;
+		while (num_bytes > 0) {
+			struct btrfs_block_group *bg, *next;
+			struct btrfs_chunk_map *map;
+			struct btrfs_dev_replace *dev_replace = &fs_info->dev_replace;
+			struct btrfs_block_rsv *global_rsv = &fs_info->global_block_rsv;
+			u64 flags = space_info->flags;
+			bool found = false;
+
+			spin_lock(&fs_info->unused_bgs_lock);
+			list_for_each_entry_safe(bg, next, &fs_info->unused_bgs,
+						 bg_list){
+
+				if ((bg->flags & BTRFS_BLOCK_GROUP_TYPE_MASK) != flags)
+					continue;
+
+				spin_lock(&bg->lock);
+				if (btrfs_is_block_group_used(bg) ||
+				    bg->zone_unusable < bg->length) {
+					spin_unlock(&bg->lock);
+					continue;
+				}
+				found = true;
+				list_del_init(&bg->bg_list);
+				btrfs_put_block_group(bg);
+				spin_unlock(&bg->lock);
+				break;
+			}
+			spin_unlock(&fs_info->unused_bgs_lock);
+			if (!found)
+				return;
+
+			pr_info("resetting unused BG %llu", bg->start);
+			down_read(&dev_replace->rwsem);
+			map = bg->physical_map;
+			for (int i = 0; i < map->num_stripes; i++) {
+				struct btrfs_device *device = map->stripes[i].dev;
+				const u64 physical = map->stripes[i].physical;
+				struct btrfs_zoned_device_info *zinfo = device->zone_info;
+				unsigned int nofs_flags;
+
+				pr_info("  reset sector %llu\n", physical >> SECTOR_SHIFT);
+				nofs_flags = memalloc_nofs_save();
+				ret = blkdev_zone_mgmt(device->bdev, REQ_OP_ZONE_RESET,
+						       physical >> SECTOR_SHIFT,
+						       zinfo->zone_size >> SECTOR_SHIFT);
+				memalloc_nofs_restore(nofs_flags);
+
+				if (ret) {
+					up_read(&dev_replace->rwsem);
+					return;
+				}
+			}
+			up_read(&dev_replace->rwsem);
+
+			spin_lock(&space_info->lock);
+			spin_lock(&bg->lock);
+			bg->zone_unusable = bg->length - bg->zone_capacity;
+			bg->alloc_offset = 0;
+			bg->free_space_ctl->free_space += bg->zone_capacity;
+			space_info->bytes_zone_unusable -= bg->zone_capacity;
+			//space_info->full = 0;
+			spin_unlock(&bg->lock);
+
+			if (global_rsv->space_info == space_info) {
+				pr_info("returnning to global_rsv");
+				spin_lock(&global_rsv->lock);
+				if (!global_rsv->full) {
+					u64 to_add = min(bg->zone_capacity,
+							 global_rsv->size - global_rsv->reserved);
+
+					global_rsv->reserved += to_add;
+					btrfs_space_info_update_bytes_may_use(fs_info,
+							space_info, to_add);
+					if (global_rsv->reserved >= global_rsv->size)
+						global_rsv->full = 1;
+				}
+				spin_unlock(&global_rsv->lock);
+			}
+			btrfs_try_granting_tickets(fs_info, space_info);
+			spin_unlock(&space_info->lock);
+			pr_info("reset unused BG %llu done\n", bg->start);
+
+			if (num_bytes < bg->zone_capacity)
+				num_bytes = 0;
+			else
+				num_bytes -= bg->zone_capacity;
+		}
+		break;
 	default:
 		ret = -ENOSPC;
 		break;
@@ -1297,6 +1390,7 @@ static const enum btrfs_flush_state data_flush_states[] = {
 	FLUSH_DELALLOC_FULL,
 	RUN_DELAYED_IPUTS,
 	COMMIT_TRANS,
+	RESET_ZONE,
 	ALLOC_CHUNK_FORCE,
 };
 
@@ -1388,6 +1482,7 @@ void btrfs_init_async_reclaim_work(struct btrfs_fs_info *fs_info)
 static const enum btrfs_flush_state priority_flush_states[] = {
 	FLUSH_DELAYED_ITEMS_NR,
 	FLUSH_DELAYED_ITEMS,
+	RESET_ZONE,
 	ALLOC_CHUNK,
 };
 
@@ -1399,6 +1494,7 @@ static const enum btrfs_flush_state evict_flush_states[] = {
 	FLUSH_DELALLOC,
 	FLUSH_DELALLOC_WAIT,
 	FLUSH_DELALLOC_FULL,
+	RESET_ZONE,
 	ALLOC_CHUNK,
 	COMMIT_TRANS,
 };

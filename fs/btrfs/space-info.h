@@ -91,6 +91,9 @@ enum btrfs_flush_state {
 	ALLOC_CHUNK_FORCE	= 9,
 	RUN_DELAYED_IPUTS	= 10,
 	COMMIT_TRANS		= 11,
+
+	/* Only on zoned mode. */
+	RESET_ZONE		= 12,
 };
 
 struct btrfs_space_info {
