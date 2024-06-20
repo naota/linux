@@ -3217,6 +3217,7 @@ int btrfs_remove_chunk(struct btrfs_trans_handle *trans, u64 chunk_offset)
 	 */
 	mutex_lock(&fs_devices->device_list_mutex);
 	for (i = 0; i < map->num_stripes; i++) {
+		u64 discarded;
 		struct btrfs_device *device = map->stripes[i].dev;
 		ret = btrfs_free_dev_extent(trans, device,
 					    map->stripes[i].physical,
@@ -3226,6 +3227,9 @@ int btrfs_remove_chunk(struct btrfs_trans_handle *trans, u64 chunk_offset)
 			btrfs_abort_transaction(trans, ret);
 			goto out;
 		}
+
+		ret = btrfs_reset_device_zone(device, map->stripes[i].physical,
+					      map->stripes[i].length, &discarded);
 
 		if (device->bytes_used > 0) {
 			mutex_lock(&fs_info->chunk_mutex);
