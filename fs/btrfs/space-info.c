@@ -802,7 +802,10 @@ static void flush_space(struct btrfs_fs_info *fs_info,
 		btrfs_end_transaction(trans);
 		break;
 	case ALLOC_CHUNK:
-	case ALLOC_CHUNK_FORCE:
+	case ALLOC_CHUNK_FORCE: {
+		bool first = true;
+
+again:
 		trans = btrfs_join_transaction(root);
 		if (IS_ERR(trans)) {
 			ret = PTR_ERR(trans);
@@ -814,9 +817,24 @@ static void flush_space(struct btrfs_fs_info *fs_info,
 					CHUNK_ALLOC_FORCE);
 		btrfs_end_transaction(trans);
 
+		if (first && ret == -ENOSPC && btrfs_is_zoned(fs_info)) {
+			wake_up_process(fs_info->cleaner_kthread);
+			down_write(&fs_info->cleanup_work_sem);
+			up_write(&fs_info->cleanup_work_sem);
+
+			ret = btrfs_commit_current_transaction(root);
+
+			first = false;
+
+			goto again;
+		}
+		if (!first)
+			pr_info("retry -> ret %d", ret);
+
 		if (ret > 0 || ret == -ENOSPC)
 			ret = 0;
 		break;
+		}
 	case RUN_DELAYED_IPUTS:
 		/*
 		 * If we have pending delayed iputs then we could free up a
