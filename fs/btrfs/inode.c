@@ -1358,9 +1358,17 @@ static noinline int cow_file_range(struct btrfs_inode *inode,
 			 */
 			ASSERT(btrfs_is_zoned(fs_info));
 			if (start == orig_start) {
+				if (sb_rdonly(inode->root->fs_info->sb)) {
+					ret = -EIO;
+					goto out_unlock;
+				}
 				wait_on_bit_io(&inode->root->fs_info->flags,
 					       BTRFS_FS_NEED_ZONE_FINISH,
 					       TASK_UNINTERRUPTIBLE);
+				if (sb_rdonly(inode->root->fs_info->sb)) {
+					ret = -EIO;
+					goto out_unlock;
+				}
 				continue;
 			}
 			if (done_offset) {
