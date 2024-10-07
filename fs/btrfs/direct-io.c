@@ -187,8 +187,12 @@ again:
 				   0, alloc_hint, &ins, 1, 1);
 	if (ret == -EAGAIN) {
 		ASSERT(btrfs_is_zoned(fs_info));
+		if (sb_rdonly(inode->root->fs_info->sb))
+			return ERR_PTR(-EIO);
 		wait_on_bit_io(&inode->root->fs_info->flags, BTRFS_FS_NEED_ZONE_FINISH,
 			       TASK_UNINTERRUPTIBLE);
+		if (sb_rdonly(inode->root->fs_info->sb))
+			return ERR_PTR(-EIO);
 		goto again;
 	}
 	if (ret)
