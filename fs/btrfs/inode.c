@@ -3110,6 +3110,11 @@ int btrfs_finish_one_ordered(struct btrfs_ordered_extent *ordered_extent)
 
 	if (test_bit(BTRFS_ORDERED_IOERR, &ordered_extent->flags)) {
 		ret = -EIO;
+		if (test_bit(BTRFS_FS_ACTIVE_ZONE_TRACKING, &fs_info->flags)) {
+			if (test_bit(BTRFS_FS_NEED_ZONE_FINISH, &fs_info->flags))
+				pr_info("wakeup waiters\n");
+			clear_and_wake_up_bit(BTRFS_FS_NEED_ZONE_FINISH, &fs_info->flags);
+		}
 		goto out;
 	}
 

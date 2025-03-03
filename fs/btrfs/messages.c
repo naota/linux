@@ -152,6 +152,7 @@ void __btrfs_handle_fs_error(struct btrfs_fs_info *fs_info, const char *function
 		pr_crit("BTRFS: error (device %s%s) in %s:%d: errno=%d %s\n",
 			sb->s_id, statestr, function, line, error, errstr);
 	}
+	// WARN_ON(1);
 #endif
 
 	/*
@@ -172,6 +173,7 @@ void __btrfs_handle_fs_error(struct btrfs_fs_info *fs_info, const char *function
 	/* Handle error by forcing the filesystem readonly. */
 	btrfs_set_sb_rdonly(sb);
 	btrfs_info(fs_info, "forced readonly");
+	clear_and_wake_up_bit(BTRFS_FS_NEED_ZONE_FINISH, &fs_info->flags);
 	/*
 	 * Note that a running device replace operation is not canceled here
 	 * although there is no way to update the progress. It would add the
