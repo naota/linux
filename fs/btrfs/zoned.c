@@ -751,14 +751,19 @@ int btrfs_check_zoned_mode(struct btrfs_fs_info *fs_info)
 	 * is safe to stick with the limit.
 	 */
 	fs_info->max_zone_append_size = ALIGN_DOWN(
-		min3((u64)lim->max_zone_append_sectors << SECTOR_SHIFT,
-		     (u64)lim->max_sectors << SECTOR_SHIFT,
-		     (u64)lim->max_segments << PAGE_SHIFT),
+		(u64)lim->max_zone_append_sectors << SECTOR_SHIFT,
 		fs_info->sectorsize);
 	fs_info->fs_devices->chunk_alloc_policy = BTRFS_CHUNK_ALLOC_ZONED;
 
 	fs_info->max_extent_size = min_not_zero(fs_info->max_extent_size,
 						fs_info->max_zone_append_size);
+	fs_info->max_extent_size_worst = min_not_zero(
+		fs_info->max_extent_size,
+		ALIGN_DOWN(
+			min3((u64)lim->max_zone_append_sectors << SECTOR_SHIFT,
+			     (u64)lim->max_sectors << SECTOR_SHIFT,
+			     (u64)lim->max_segments << PAGE_SHIFT),
+			fs_info->sectorsize));
 
 	/*
 	 * Check mount options here, because we might change fs_info->zoned

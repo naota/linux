@@ -2363,7 +2363,7 @@ void btrfs_split_delalloc_extent(struct btrfs_inode *inode,
 		return;
 
 	size = orig->end - orig->start + 1;
-	if (size > fs_info->max_extent_size) {
+	if (size > fs_info->max_extent_size_worst) {
 		u32 num_extents;
 		u64 new_size;
 
@@ -2408,7 +2408,7 @@ void btrfs_merge_delalloc_extent(struct btrfs_inode *inode, struct extent_state 
 		new_size = other->end - new->start + 1;
 
 	/* we're not bigger than the max, unreserve the space and go */
-	if (new_size <= fs_info->max_extent_size) {
+	if (new_size <= fs_info->max_extent_size_worst) {
 		spin_lock(&inode->lock);
 		btrfs_mod_outstanding_extents(inode, -1);
 		spin_unlock(&inode->lock);

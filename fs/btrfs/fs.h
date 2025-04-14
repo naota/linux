@@ -823,6 +823,7 @@ struct btrfs_fs_info {
 	 * filesystem, on zoned it depends on the device constraints.
 	 */
 	u64 max_extent_size;
+	u64 max_extent_size_worst;
 
 	/* Block groups and devices containing active swapfiles. */
 	spinlock_t swapfile_pins_lock;
@@ -993,7 +994,7 @@ static inline u32 count_max_extents(const struct btrfs_fs_info *fs_info, u64 siz
 		return div_u64(size + BTRFS_MAX_EXTENT_SIZE - 1, BTRFS_MAX_EXTENT_SIZE);
 #endif
 
-	return div_u64(size + fs_info->max_extent_size - 1, fs_info->max_extent_size);
+	return div_u64(size + fs_info->max_extent_size_worst - 1, fs_info->max_extent_size_worst);
 }
 
 static inline unsigned int btrfs_blocks_per_folio(const struct btrfs_fs_info *fs_info,
