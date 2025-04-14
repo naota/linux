@@ -2903,6 +2903,7 @@ void btrfs_init_fs_info(struct btrfs_fs_info *fs_info)
 	fs_info->compress_type = BTRFS_COMPRESS_ZLIB;
 
 	fs_info->max_extent_size = BTRFS_MAX_EXTENT_SIZE;
+	fs_info->max_extent_size_worst = BTRFS_MAX_EXTENT_SIZE;
 
 	spin_lock_init(&fs_info->swapfile_pins_lock);
 	fs_info->swapfile_pins = RB_ROOT;
