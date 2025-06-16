@@ -755,8 +755,8 @@ int btrfs_check_zoned_mode(struct btrfs_fs_info *fs_info)
 		fs_info->sectorsize);
 	fs_info->fs_devices->chunk_alloc_policy = BTRFS_CHUNK_ALLOC_ZONED;
 
-	fs_info->max_extent_size = min_not_zero(fs_info->max_extent_size,
-						fs_info->max_zone_append_size);
+	//fs_info->max_extent_size = min_not_zero(fs_info->max_extent_size,
+//						fs_info->max_zone_append_size);
 	fs_info->max_extent_size_worst = min_not_zero(
 		fs_info->max_extent_size,
 		ALIGN_DOWN(
