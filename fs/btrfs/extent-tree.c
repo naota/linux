@@ -3838,40 +3838,17 @@ static int do_allocation_zoned(struct btrfs_block_group *block_group,
 	u64 start = block_group->start;
 	u64 num_bytes = ffe_ctl->num_bytes;
 	u64 avail;
-	u64 bytenr = block_group->start;
-	u64 log_bytenr;
-	u64 data_reloc_bytenr;
 	int ret = 0;
-	bool skip = false;
 
 	ASSERT(btrfs_is_zoned(block_group->fs_info));
 
-	/*
-	 * Do not allow non-tree-log blocks in the dedicated tree-log block
-	 * group, and vice versa.
-	 */
-	spin_lock(&fs_info->treelog_bg_lock);
-	log_bytenr = fs_info->treelog_bg;
-	if (log_bytenr && ((ffe_ctl->for_treelog && bytenr != log_bytenr) ||
-			   (!ffe_ctl->for_treelog && bytenr == log_bytenr)))
-		skip = true;
-	spin_unlock(&fs_info->treelog_bg_lock);
-	if (skip)
-		return 1;
-
-	/*
-	 * Do not allow non-relocation blocks in the dedicated relocation block
-	 * group, and vice versa.
-	 */
-	spin_lock(&fs_info->relocation_bg_lock);
-	data_reloc_bytenr = fs_info->data_reloc_bg;
-	if (data_reloc_bytenr &&
-	    ((ffe_ctl->for_data_reloc && bytenr != data_reloc_bytenr) ||
-	     (!ffe_ctl->for_data_reloc && bytenr == data_reloc_bytenr)))
-		skip = true;
-	spin_unlock(&fs_info->relocation_bg_lock);
-	if (skip)
-		return 1;
+	/* Ensure that we choose a proper block group. */
+	if (ffe_ctl->for_treelog)
+		ASSERT(space_info->subgroup_id == BTRFS_SUB_GROUP_TREELOG);
+	else if (ffe_ctl->for_data_reloc)
+		ASSERT(space_info->subgroup_id == BTRFS_SUB_GROUP_DATA_RELOC);
+	else
+		ASSERT(space_info->subgroup_id == BTRFS_SUB_GROUP_PRIMARY);
 
 	/* Check RO and no space case before trying to activate it */
 	spin_lock(&block_group->lock);
