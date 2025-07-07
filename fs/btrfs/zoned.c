@@ -18,6 +18,7 @@
 #include "accessors.h"
 #include "bio.h"
 #include "transaction.h"
+#include "sysfs.h"
 
 /* Maximum number of zones to report per blkdev_report_zones() call */
 #define BTRFS_REPORT_NR_ZONES   4096
@@ -2505,12 +2506,12 @@ void btrfs_clear_data_reloc_bg(struct btrfs_block_group *bg)
 void btrfs_zoned_reserve_data_reloc_bg(struct btrfs_fs_info *fs_info)
 {
 	struct btrfs_space_info *data_sinfo = fs_info->data_sinfo;
-	struct btrfs_space_info *space_info = data_sinfo->sub_group[0];
+	struct btrfs_space_info *space_info = data_sinfo;
 	struct btrfs_trans_handle *trans;
 	struct btrfs_block_group *bg;
 	struct list_head *bg_list;
 	u64 alloc_flags;
-	bool initial = false;
+	bool first = true;
 	bool did_chunk_alloc = false;
 	int index;
 	int ret;
@@ -2524,19 +2525,57 @@ void btrfs_zoned_reserve_data_reloc_bg(struct btrfs_fs_info *fs_info)
 	if (sb_rdonly(fs_info->sb))
 		return;
 
-	ASSERT(space_info->subgroup_id == BTRFS_SUB_GROUP_DATA_RELOC);
 	alloc_flags = btrfs_get_alloc_profile(fs_info, space_info->flags);
 	index = btrfs_bg_flags_to_raid_index(alloc_flags);
 
-	bg_list = &data_sinfo->block_groups[index];
+	/*
+	 * First, scan the data space_info to find empty block groups. Take
+	 * the second empty one.
+	 */
 again:
+	bg_list = &space_info->block_groups[index];
 	list_for_each_entry(bg, bg_list, list) {
-		if (bg->used > 0)
+		if (bg->alloc_offset != 0)
 			continue;
 
-		if (!initial) {
-			initial = true;
+		if (first) {
+			first = false;
 			continue;
+		}
+
+		if (space_info == data_sinfo) {
+			/*
+			 * Migrate the block group to the data relocation
+			 * space_info.
+			 */
+			struct btrfs_space_info *reloc_sinfo = data_sinfo->sub_group[0];
+			int factor;
+
+			ASSERT(reloc_sinfo->subgroup_id == BTRFS_SUB_GROUP_DATA_RELOC);
+			factor = btrfs_bg_type_to_factor(bg->flags);
+
+			down_write(&space_info->groups_sem);
+			list_del_init(&bg->list);
+			up_write(&space_info->groups_sem);
+			/* TODO: need to handle block_group_kobjs etc... */
+
+			spin_lock(&space_info->lock);
+			space_info->total_bytes -= bg->length;
+			space_info->disk_total -= bg->length * factor;
+			ASSERT(bg->used == 0);
+			// space_info->bytes_used -= bg->used;
+			// space_info->disk_used -= bg->used * factor;
+			ASSERT(bg->bytes_super == 0);
+			// space_info->bytes_readonly -= bg->bytes_super;
+			ASSERT(bg->zone_unusable == 0);
+			// btrfs_space_info_update_bytes_zone_unusable(space_info, -bg->zone_unusable);
+			spin_unlock(&space_info->lock);
+
+			bg->space_info = reloc_sinfo;
+			if (reloc_sinfo->block_group_kobjs[index] == NULL)
+				btrfs_sysfs_add_block_group_type(bg);
+
+			btrfs_add_bg_to_space_info(fs_info, bg);
 		}
 
 		fs_info->data_reloc_bg = bg->start;
@@ -2553,11 +2592,18 @@ again:
 	if (IS_ERR(trans))
 		return;
 
+	/* Allocate new BG in the data relocation space_info. */
+	space_info = data_sinfo->sub_group[0];
+	ASSERT(space_info->subgroup_id == BTRFS_SUB_GROUP_DATA_RELOC);
 	ret = btrfs_chunk_alloc(trans, space_info, alloc_flags, CHUNK_ALLOC_FORCE);
 	btrfs_end_transaction(trans);
 	if (ret == 1) {
+		/*
+		 * We allocated a new block group in the data relocation
+		 * space_info. We can take that one.
+		 */
+		first = false;
 		did_chunk_alloc = true;
-		bg_list = &space_info->block_groups[index];
 		goto again;
 	}
 }
