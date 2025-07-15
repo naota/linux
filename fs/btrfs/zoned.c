@@ -425,7 +425,6 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device, bool populate_cache)
 	if (!max_active_zones && zone_info->nr_zones > BTRFS_DEFAULT_MAX_ACTIVE_ZONES)
 		max_active_zones = BTRFS_DEFAULT_MAX_ACTIVE_ZONES;
 
-#ifdef CONFIG_BTRFS_DEBUG
 	if (fs_info->max_active_zones_limit) {
 		/*
 		 * Apply the limit if the device has non-zero max_active_zones. If not
@@ -437,7 +436,6 @@ int btrfs_get_dev_zone_info(struct btrfs_device *device, bool populate_cache)
 		btrfs_info(fs_info, "zoned: applying max_active_zones=%u",
 			   max_active_zones);
 	}
-#endif
 
 	if (max_active_zones && max_active_zones < BTRFS_MIN_ACTIVE_ZONES) {
 		btrfs_err(fs_info,
