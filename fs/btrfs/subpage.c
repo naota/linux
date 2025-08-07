@@ -456,7 +456,7 @@ void btrfs_subpage_set_writeback(const struct btrfs_fs_info *fs_info,
 	 * ordering guarantees.
 	 */
 	if (!folio_test_writeback(folio))
-		folio_start_writeback_keepwrite(folio);
+		__folio_start_writeback(folio, true);
 	if (!folio_test_dirty(folio)) {
 		struct address_space *mapping = folio_mapping(folio);
 		XA_STATE(xas, &mapping->i_pages, folio->index);
